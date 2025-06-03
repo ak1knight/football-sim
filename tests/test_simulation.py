@@ -96,15 +96,13 @@ class TestGameEngine(unittest.TestCase):
             away_team=self.away_team,
             home_score=14,
             away_score=14,
-            duration=60
-        )
+            duration=60        )
         self.assertIsNone(result.winner)
     
     def test_reproducible_simulations(self):
         """Test that simulations with the same seed are reproducible."""
         engine1 = GameEngine(seed=42)
-        engine2 = GameEngine(seed=42)
-        
+        engine2 = GameEngine(seed=42)        
         result1 = engine1.simulate_game(self.home_team, self.away_team)
         result2 = engine2.simulate_game(self.home_team, self.away_team)
         
@@ -113,17 +111,30 @@ class TestGameEngine(unittest.TestCase):
     
     def test_different_seeds_produce_different_results(self):
         """Test that different seeds can produce different results."""
-        engine1 = GameEngine(seed=1)
-        engine2 = GameEngine(seed=2)
         
         # Run multiple simulations to increase chance of different outcomes
         results1 = []
         results2 = []
         
-        for _ in range(5):
-            # Reset teams for fresh simulations
-            fresh_home = Team("Home", "Home", "HOM", "NFC", "East")
-            fresh_away = Team("Away", "Away", "AWY", "AFC", "West")
+        for i in range(5):
+            # Create engines with different seeds for each iteration
+            engine1 = GameEngine(seed=i + 1)
+            engine2 = GameEngine(seed=i + 100)
+            
+            # Reset teams for fresh simulations with better stats
+            home_stats = TeamStats(
+                offensive_rating=80,
+                defensive_rating=75,
+                coaching_rating=75
+            )
+            away_stats = TeamStats(
+                offensive_rating=75,
+                defensive_rating=80,
+                coaching_rating=75
+            )
+            
+            fresh_home = Team("Home", "Home", "HOM", "NFC", "East", stats=home_stats)
+            fresh_away = Team("Away", "Away", "AWY", "AFC", "West", stats=away_stats)
             
             fresh_home.add_player(Player("QB", Position.QB, 1, PlayerStats(overall_rating=80)))
             fresh_away.add_player(Player("QB", Position.QB, 1, PlayerStats(overall_rating=80)))
