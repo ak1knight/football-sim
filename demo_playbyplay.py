@@ -47,12 +47,18 @@ def main():
     print("\n" + "=" * 60)
     print("GAME SUMMARY")
     print("=" * 60)
-    print(game_engine.reporter.get_game_summary())
+    if game_engine.reporter is not None:
+        print(game_engine.reporter.get_game_summary())
+    else:
+        print("No game summary available (reporter not enabled).")
     
     print("\n" + "=" * 60)
     print("DRIVE SUMMARY")
     print("=" * 60)
-    print(game_engine.reporter.get_drive_summary())
+    if game_engine.reporter is not None:
+        print(game_engine.reporter.get_drive_summary())
+    else:
+        print("No drive summary available (reporter not enabled).")
     
     # Show final result
     winner = result.winner

@@ -6,6 +6,7 @@ A comprehensive Python-based simulation engine for American football featuring a
 
 - **All 32 NFL Teams**: Complete database with realistic 2024-2025 season ratings
 - **Play-by-Play Simulation**: Individual play simulation with realistic field position tracking
+- **Weather Effects**: Dynamic weather conditions that realistically impact gameplay
 - **Advanced Reporting**: Comprehensive play-by-play and drive reporting system
 - **Realistic Game Flow**: Authentic NFL-style scores, turnovers, and game mechanics
 - **Special Teams**: Kickoff returns, punt returns, field goal attempts with team-specific ratings
@@ -13,27 +14,32 @@ A comprehensive Python-based simulation engine for American football featuring a
 - **Statistical Analysis**: Offensive, defensive, special teams, and red zone efficiency ratings
 - **API Ready**: REST API endpoints designed for React frontend integration
 - **Extensible Design**: Easy to add new features, sports, or leagues
-- **Comprehensive Testing**: 49 passing unit tests with 100% coverage
+- **Comprehensive Testing**: 67 passing unit tests with 100% coverage
 
 ## Project Structure
 
-```
+```plaintext
 football-sim/
 ├── main.py                 # Main entry point and demo
 ├── models/                 # Data models
 │   ├── player.py          # Player class with stats and positions
-│   └── team.py            # Team class with roster and ratings
+│   ├── team.py            # Team class with roster and ratings
+│   └── weather.py         # Weather conditions and effects
 ├── simulation/             # Game simulation engine
-│   └── game_engine.py     # Core simulation logic
+│   ├── game_engine.py     # Core simulation logic with weather integration
+│   └── game_reporter.py   # Play-by-play reporting system
 ├── data/                   # Data management
-│   └── team_loader.py     # Sample data and data loading utilities
+│   └── team_loader.py     # All 32 NFL teams with realistic ratings
 ├── api/                    # REST API (future React integration)
 │   ├── simulation_api.py  # Game simulation endpoints
 │   └── team_api.py        # Team management endpoints
 ├── tests/                  # Unit tests
 │   ├── test_models.py     # Tests for data models
 │   ├── test_simulation.py # Tests for game engine
+│   ├── test_weather.py    # Tests for weather system
 │   └── test_api.py        # Tests for API endpoints
+├── demo_weather.py         # Weather effects demonstration
+├── demo_*.py              # Various feature demonstrations
 └── requirements.txt        # Python dependencies
 ```
 
@@ -206,6 +212,40 @@ quarterback = Player(
 custom_team.add_player(quarterback)
 ```
 
+### Weather-Affected Simulation
+
+```python
+from models.weather import Weather, WeatherCondition, WindDirection
+from simulation.game_engine import GameEngine
+from data.team_loader import load_sample_teams
+
+teams = load_sample_teams()
+home_team = next(t for t in teams if t.name == "Packers")  # Cold weather team
+away_team = next(t for t in teams if t.name == "Dolphins")  # Warm weather team
+
+# Create severe weather conditions
+blizzard = Weather(
+    condition=WeatherCondition.HEAVY_SNOW,
+    temperature=15,
+    wind_speed=25,
+    wind_direction=WindDirection.CROSSWIND,
+    precipitation_intensity=0.9
+)
+
+# Simulate game with weather effects
+engine = GameEngine(seed=42, weather=blizzard, enable_reporting=True, verbose=True)
+result = engine.simulate_game(home_team, away_team)
+
+print(f"Weather: {result.weather}")
+print(f"Severity: {result.weather.get_severity_rating()}")
+print(f"Final Score: {result.away_team.name} {result.away_score} - {result.home_team.name} {result.home_score}")
+
+# Compare with random weather
+engine_random = GameEngine(seed=42)  # Will generate random weather
+result_random = engine_random.simulate_game(home_team, away_team)
+print(f"Random Weather: {result_random.weather}")
+```
+
 ## Game Simulation Details
 
 ### Team Ratings
@@ -234,6 +274,38 @@ The simulation supports all major NFL positions:
 - **Statistical Factors**: Team ratings influence drive success probability
 - **Home Field Advantage**: Home teams receive rating bonuses
 - **Reproducible Results**: Use seeds for consistent outcomes in testing
+
+### Weather Effects
+
+The simulation includes a comprehensive weather system that realistically affects gameplay:
+
+#### Weather Conditions
+
+- **Clear**: Ideal playing conditions with no weather effects
+- **Cloudy**: Minimal impact on gameplay
+- **Rain (Light/Heavy)**: Reduces passing accuracy, increases fumbles, affects field conditions
+- **Snow (Light/Heavy)**: Significantly reduces visibility and accuracy, increases turnovers
+- **Fog**: Reduces visibility, affecting passing and kicking accuracy
+- **Wind**: Affects kicking distance/accuracy and passing based on direction (crosswind, headwind, tailwind)
+- **Temperature**: Extreme cold reduces accuracy and increases fumbles; extreme heat affects player conditioning
+
+#### Gameplay Effects
+
+- **Passing**: Accuracy and distance reduced in poor weather
+- **Kicking**: Field goal accuracy and distance affected by wind and precipitation
+- **Turnovers**: Fumble rates increase in wet/cold conditions
+- **Visibility**: Fog and heavy precipitation affect all skill positions
+- **Field Conditions**: Rain and snow make footing more difficult
+
+#### Weather Severity
+
+Weather conditions are classified by severity:
+
+- **Ideal**: Perfect playing conditions
+- **Mild**: Minimal impact on gameplay  
+- **Moderate**: Noticeable effects on certain aspects
+- **Severe**: Significant impact on multiple game elements
+- **Extreme**: Major effects across all aspects of gameplay
 
 ## API Endpoints (Future React Integration)
 

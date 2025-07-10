@@ -5,7 +5,7 @@ This module provides detailed reporting capabilities for football simulations,
 including play-by-play narratives and drive summaries.
 """
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from models.team import Team
 
@@ -69,9 +69,9 @@ class GameReporter:
     
     def __init__(self):
         """Initialize the game reporter."""
-        self.current_game: GameReport = None
-        self.current_quarter: QuarterReport = None
-        self.current_drive: DriveReport = None
+        self.current_game: Optional[GameReport] = None
+        self.current_quarter: Optional[QuarterReport] = None
+        self.current_drive: Optional[DriveReport] = None
         self.verbose = False
     
     def start_game(self, home_team: Team, away_team: Team, verbose: bool = False):
@@ -94,7 +94,7 @@ class GameReporter:
     
     def end_quarter(self, home_points: int, away_points: int):
         """End the current quarter."""
-        if self.current_quarter:
+        if self.current_quarter and self.current_game:
             self.current_quarter.home_points = home_points
             self.current_quarter.away_points = away_points
             self.current_game.quarters.append(self.current_quarter)
@@ -167,17 +167,18 @@ class GameReporter:
     
     def end_game(self, home_score: int, away_score: int, duration: int, overtime: bool = False):
         """End the game and finalize the report."""
-        self.current_game.final_home_score = home_score
-        self.current_game.final_away_score = away_score
-        self.current_game.game_duration = duration
-        self.current_game.overtime = overtime
-        
-        if self.verbose:
-            print(f"\n{'='*60}")
-            print(f"FINAL: {self.current_game.home_team} {home_score}, {self.current_game.away_team} {away_score}")
-            if overtime:
-                print("Game went to overtime")
-            print(f"{'='*60}")
+        if self.current_game is not None:
+            self.current_game.final_home_score = home_score
+            self.current_game.final_away_score = away_score
+            self.current_game.game_duration = duration
+            self.current_game.overtime = overtime
+            
+            if self.verbose:
+                print(f"\n{'='*60}")
+                print(f"FINAL: {self.current_game.home_team} {home_score}, {self.current_game.away_team} {away_score}")
+                if overtime:
+                    print("Game went to overtime")
+                print(f"{'='*60}")
     
     def get_game_summary(self) -> str:
         """Get a summary of the game."""
