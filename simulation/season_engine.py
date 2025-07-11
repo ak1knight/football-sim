@@ -14,6 +14,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 from models.team import Team
+from simulation.schedule_generators import ScheduleGenerator, NFLScheduleGenerator
 
 
 class GameStatus(Enum):
@@ -149,7 +150,8 @@ class SeasonEngine:
     and provides clean APIs for frontend integration.
     """
     
-    def __init__(self, teams: List[Team], season_year: int = 2024, seed: Optional[int] = None):
+    def __init__(self, teams: List[Team], season_year: int = 2024, seed: Optional[int] = None, 
+                 schedule_generator: Optional[ScheduleGenerator] = None):
         """
         Initialize the season engine.
         
@@ -157,10 +159,14 @@ class SeasonEngine:
             teams: List of all teams in the league
             season_year: Year of the season
             seed: Random seed for reproducible scheduling
+            schedule_generator: Optional schedule generator instance (defaults to NFLScheduleGenerator)
         """
         self.teams = teams
         self.season_year = season_year
         self.seed = seed
+        
+        # Use provided schedule generator or default to NFL
+        self.schedule_generator = schedule_generator or NFLScheduleGenerator()
         
         if seed is not None:
             random.seed(seed)
@@ -182,7 +188,7 @@ class SeasonEngine:
         self._generate_schedule()
     
     def _generate_schedule(self) -> None:
-        """Generate the complete regular season schedule."""
+        """Generate the complete regular season schedule using the pluggable schedule generator."""
         self.schedule = []
         game_counter = 0
         
@@ -191,16 +197,15 @@ class SeasonEngine:
         while start_date.weekday() != 6:  # Find first Sunday
             start_date += timedelta(days=1)
         
-        # Create all possible matchups for the season
-        all_matchups = self._generate_season_matchups()
+        # Use the schedule generator to create the weekly schedule
+        weekly_schedule = self.schedule_generator.generate_schedule(self.teams, self.season_year, self.seed)
         
-        # Distribute matchups across 17 weeks
-        week_matchups = self._distribute_matchups_by_week(all_matchups)
+        # Convert the weekly schedule to ScheduledGame objects
+        total_weeks = self.schedule_generator.get_total_weeks()
         
-        # Create ScheduledGame objects
-        for week in range(1, 18):
-            if week in week_matchups:
-                for home_team, away_team in week_matchups[week]:
+        for week in range(1, total_weeks + 1):
+            if week in weekly_schedule:
+                for home_team, away_team in weekly_schedule[week]:
                     game_id = f"{self.season_year}_W{week:02d}_G{game_counter:03d}"
                     game_date = start_date + timedelta(weeks=week-1)
                     
@@ -214,254 +219,6 @@ class SeasonEngine:
                     
                     self.schedule.append(game)
                     game_counter += 1
-    
-    def _generate_season_matchups(self) -> List[Tuple[Team, Team]]:
-        """
-        Generate all matchups for the season following NFL-style scheduling.
-        
-        Each team plays 17 games:
-        - 6 games against division rivals (3 others x 2 games each)
-        - 4 games against one division in same conference (rotating)
-        - 4 games against one division in opposite conference (rotating)
-        - 3 games against remaining teams in conference
-        
-        For simplicity with any number of teams, we'll use a round-robin approach
-        where each team plays every other team once, with some teams playing twice.
-        """
-        matchups = []
-        divisions = self._organize_by_division()
-        
-        # If we have exactly 32 teams (8 divisions of 4), use NFL rules
-        if len(self.teams) == 32 and len(divisions) == 8:
-            matchups = self._generate_nfl_style_matchups(divisions)
-        else:
-            # For other configurations, use modified round-robin
-            matchups = self._generate_round_robin_matchups()
-        
-        return matchups
-    
-    def _generate_nfl_style_matchups(self, divisions: Dict[str, List[Team]]) -> List[Tuple[Team, Team]]:
-        """Generate NFL-style matchups following exact NFL scheduling rules."""
-        matchups = []
-        
-        # Group divisions by conference
-        afc_divisions = {k: v for k, v in divisions.items() if k.startswith('AFC')}
-        nfc_divisions = {k: v for k, v in divisions.items() if k.startswith('NFC')}
-        
-        # Convert to lists for easier rotation logic
-        afc_division_list = list(afc_divisions.keys())
-        nfc_division_list = list(nfc_divisions.keys())
-        
-        # For each team, generate their exact 17-game schedule
-        for division_name, division_teams in divisions.items():
-            conference = 'AFC' if division_name.startswith('AFC') else 'NFC'
-            
-            # Get division index for rotation calculations
-            same_conf_divisions = afc_division_list if conference == 'AFC' else nfc_division_list
-            division_index = same_conf_divisions.index(division_name)
-            
-            for team in division_teams:
-                team_matchups = []
-                
-                # 1. Six games against divisional opponents (home and away vs each)
-                for rival in division_teams:
-                    if rival != team:
-                        # Each divisional opponent twice: once home, once away
-                        team_matchups.append((team, rival))     # Home game
-                        team_matchups.append((rival, team))     # Away game
-                
-                # 2. Four games against one division in same conference
-                # Rotate which division based on the year and division
-                other_same_conf_divs = [d for d in same_conf_divisions if d != division_name]
-                target_division = None
-                
-                if other_same_conf_divs:
-                    # Use season year and division index to rotate fairly
-                    rotation_offset = (self.season_year + division_index) % len(other_same_conf_divs)
-                    target_division = other_same_conf_divs[rotation_offset]
-                    
-                    target_teams = divisions[target_division]
-                    home_count = 0
-                    for opponent in target_teams:
-                        # Alternate home/away for balance
-                        if home_count < 2:
-                            team_matchups.append((team, opponent))     # Home
-                            home_count += 1
-                        else:
-                            team_matchups.append((opponent, team))     # Away
-                
-                # 3. Four games against one division in opposite conference
-                opp_conf_divisions = nfc_division_list if conference == 'AFC' else afc_division_list
-                target_opp_division = None
-                
-                if opp_conf_divisions:
-                    # Rotate which opposite conference division
-                    rotation_offset = (self.season_year + division_index) % len(opp_conf_divisions)
-                    target_opp_division = opp_conf_divisions[rotation_offset]
-                    
-                    target_opp_teams = divisions[target_opp_division]
-                    home_count = 0
-                    for opponent in target_opp_teams:
-                        # Alternate home/away for balance
-                        if home_count < 2:
-                            team_matchups.append((team, opponent))     # Home
-                            home_count += 1
-                        else:
-                            team_matchups.append((opponent, team))     # Away
-                
-                # 4. Two games from remaining divisions in same conference
-                # Based on previous season standings (simplified: use team index)
-                if target_division:
-                    remaining_same_conf_divs = [d for d in other_same_conf_divs if d != target_division]
-                    
-                    games_needed = 2
-                    for div in remaining_same_conf_divs:
-                        if games_needed <= 0:
-                            break
-                        
-                        div_teams = divisions[div]
-                        # Pick one team from each remaining division based on "standings"
-                        # Simplified: use team abbreviation hash for consistent but varied selection
-                        team_index = hash(team.abbreviation) % len(div_teams)
-                        opponent = div_teams[team_index]
-                        
-                        # Alternate home/away
-                        if games_needed % 2 == 0:
-                            team_matchups.append((team, opponent))     # Home
-                        else:
-                            team_matchups.append((opponent, team))     # Away
-                        
-                        games_needed -= 1
-                
-                # 5. The 17th game (additional non-conference opponent)
-                if len(team_matchups) == 16 and target_opp_division:
-                    # Find a non-conference division we haven't played against
-                    opp_conf_divisions = nfc_division_list if conference == 'AFC' else afc_division_list
-                    available_opp_divs = [d for d in opp_conf_divisions if d != target_opp_division]
-                    
-                    if available_opp_divs:
-                        # Pick based on team's "ranking" simulation
-                        div_index = hash(team.abbreviation + str(self.season_year)) % len(available_opp_divs)
-                        chosen_div = available_opp_divs[div_index]
-                        chosen_div_teams = divisions[chosen_div]
-                        
-                        # Pick opponent from that division
-                        opp_index = hash(team.abbreviation) % len(chosen_div_teams)
-                        opponent = chosen_div_teams[opp_index]
-                        
-                        # Random home/away for 17th game
-                        if hash(team.abbreviation + opponent.abbreviation) % 2 == 0:
-                            team_matchups.append((team, opponent))     # Home
-                        else:
-                            team_matchups.append((opponent, team))     # Away
-                
-                # Add this team's matchups to the overall list
-                matchups.extend(team_matchups)
-        
-        # Remove duplicates while preserving divisional double-headers
-        unique_matchups = []
-        seen = set()
-        
-        for home, away in matchups:
-            # Create a directional game identifier (home@away matters for NFL)
-            game_key = f"{home.abbreviation}@{away.abbreviation}"
-            
-            # Only add if we haven't seen this exact game before
-            if game_key not in seen:
-                seen.add(game_key)
-                unique_matchups.append((home, away))
-        
-        return unique_matchups
-    
-    def _generate_round_robin_matchups(self) -> List[Tuple[Team, Team]]:
-        """Generate matchups ensuring balanced schedule with variety."""
-        matchups = []
-        num_teams = len(self.teams)
-        
-        # Simple but effective: each team plays most other teams once
-        # Plus a few rematches to reach closer to 17 games per team
-        
-        # Round 1: Everyone plays everyone once
-        for i in range(num_teams):
-            for j in range(i + 1, num_teams):
-                home_team = self.teams[i]
-                away_team = self.teams[j]
-                
-                # Randomly decide home/away
-                if random.random() < 0.5:
-                    matchups.append((home_team, away_team))
-                else:
-                    matchups.append((away_team, home_team))
-        
-        # Now we have 496 matchups (31 games per team)
-        # We need to reduce this to about 272 matchups (17 games per team)
-        # So we'll randomly select about 55% of the matchups
-        
-        target_matchups = min(272, len(matchups))
-        
-        # Shuffle and select the first target_matchups
-        random.shuffle(matchups)
-        selected_matchups = matchups[:target_matchups]
-        
-        return selected_matchups
-    
-    def _distribute_matchups_by_week(self, matchups: List[Tuple[Team, Team]]) -> Dict[int, List[Tuple[Team, Team]]]:
-        """Distribute matchups across 17 weeks ensuring no team plays twice in one week."""
-        week_matchups = {week: [] for week in range(1, 18)}
-        remaining_matchups = matchups.copy()
-        random.shuffle(remaining_matchups)
-        
-        for week in range(1, 18):
-            used_teams_this_week = set()
-            week_games = []
-            
-            # Try to schedule as many games as possible for this week
-            matchups_to_remove = []
-            
-            for matchup in remaining_matchups:
-                home_team, away_team = matchup
-                
-                # Check if either team is already playing this week
-                if (home_team.abbreviation not in used_teams_this_week and 
-                    away_team.abbreviation not in used_teams_this_week):
-                    
-                    week_games.append(matchup)
-                    used_teams_this_week.add(home_team.abbreviation)
-                    used_teams_this_week.add(away_team.abbreviation)
-                    matchups_to_remove.append(matchup)
-            
-            # Remove scheduled games from remaining matchups
-            for matchup in matchups_to_remove:
-                remaining_matchups.remove(matchup)
-            
-            week_matchups[week] = week_games
-        
-        # If there are remaining matchups, distribute them to weeks with space
-        for remaining_matchup in remaining_matchups:
-            for week in range(1, 18):
-                home_team, away_team = remaining_matchup
-                week_teams = set()
-                
-                # Get teams already playing this week
-                for existing_home, existing_away in week_matchups[week]:
-                    week_teams.add(existing_home.abbreviation)
-                    week_teams.add(existing_away.abbreviation)
-                
-                # If neither team is playing this week, add the game
-                if (home_team.abbreviation not in week_teams and 
-                    away_team.abbreviation not in week_teams):
-                    week_matchups[week].append(remaining_matchup)
-                    break
-        
-        return week_matchups
-    
-    def _organize_by_division(self) -> Dict[str, List[Team]]:
-        """Organize teams by conference and division."""
-        divisions = defaultdict(list)
-        for team in self.teams:
-            division_key = f"{team.conference} {team.division}"
-            divisions[division_key].append(team)
-        return dict(divisions)
     
     def get_next_games(self, limit: int = 16) -> List[ScheduledGame]:
         """
@@ -602,7 +359,7 @@ class SeasonEngine:
             self.current_week += 1
             
             # Check if regular season is complete
-            if self.current_week > 17:
+            if self.current_week > self.schedule_generator.get_total_weeks():
                 self.current_phase = SeasonPhase.PLAYOFFS
     
     def get_standings(self, by_division: bool = True) -> Dict:
@@ -663,6 +420,7 @@ class SeasonEngine:
         """Get comprehensive season status information."""
         total_games = len(self.schedule)
         completed_games = len(self.completed_games)
+        total_weeks = self.schedule_generator.get_total_weeks()
         
         return {
             'season_year': self.season_year,
@@ -672,7 +430,8 @@ class SeasonEngine:
             'completed_games': completed_games,
             'completion_percentage': round((completed_games / total_games) * 100, 1) if total_games > 0 else 0,
             'next_games_count': len(self.get_next_games()),
-            'weeks_remaining': max(0, 17 - self.current_week + 1) if self.current_phase == SeasonPhase.REGULAR_SEASON else 0
+            'weeks_remaining': max(0, total_weeks - self.current_week + 1) if self.current_phase == SeasonPhase.REGULAR_SEASON else 0,
+            'schedule_type': self.schedule_generator.get_schedule_name() if hasattr(self.schedule_generator, 'get_schedule_name') else 'Custom Schedule'
         }
     
     def get_team_schedule(self, team_abbreviation: str) -> List[Dict]:
