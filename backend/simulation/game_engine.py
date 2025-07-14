@@ -6,7 +6,6 @@ including play-by-play simulation, scoring, and game flow.
 """
 
 import random
-import random
 import logging
 import numpy as np
 from dataclasses import dataclass
@@ -294,110 +293,6 @@ class GameEngine:
 
         return home_points, away_points
 
-    def _simulate_drive(self, offense: Team, defense: Team, is_home: bool, field_position: int) -> dict:
-        """
-        Simulate a single offensive drive with individual plays.
-        
-        Args:
-            offense: Team with possession
-            defense: Defending team
-            is_home: Whether the offensive team is playing at home
-            field_position: Starting field position (0-100, where 0 is offense's goal line)
-            
-        Returns:
-            Dictionary with drive result and points scored
-        """
-        yards_to_go = 100 - field_position  # Yards needed to reach end zone
-        down = 1
-        yards_for_first_down = 10
-        plays_in_drive = 0
-        max_plays = 20  # Safety limit to prevent infinite drives
-        current_field_position = field_position
-        
-        # Initialize default values
-        result = "punt"
-        points = 0
-        
-        self.logger.debug(f"{offense.name} starting drive at {field_position}-yard line")
-        while plays_in_drive < max_plays:
-            plays_in_drive += 1
-            
-            # Simulate individual play
-            play_result = self._simulate_play(offense, defense, is_home, down, yards_for_first_down, current_field_position)
-            
-            # Add play to reporting
-            if self.reporter:
-                self.reporter.add_play(
-                    plays_in_drive, down, yards_for_first_down, current_field_position,
-                    play_result['play_type'], play_result['yards_gained'], 
-                    current_field_position + play_result['yards_gained']
-                )
-            
-            # Update field position
-            yards_gained = play_result['yards_gained']
-            current_field_position += yards_gained
-            yards_to_go = 100 - current_field_position
-            yards_for_first_down -= yards_gained
-            
-            self.logger.debug(f"Play {plays_in_drive}: {play_result['play_type']} for {yards_gained} yards. "
-                            f"At {current_field_position}-yard line, {down} down, {max(0, yards_for_first_down)} to go")
-            
-            # Check for scoring (field position >= 100 means touchdown)
-            if current_field_position >= 100:
-                if play_result['play_type'] == 'turnover':
-                    result = "turnover"
-                    points = 0
-                else:
-                    result = "touchdown"
-                    points = 7  # TD + extra point
-                    current_field_position = 100  # Cap at goal line for reporting
-                break
-            
-            # Check for turnover
-            if play_result['play_type'] == 'turnover':
-                result = "turnover"
-                points = 0
-                break
-            
-            # Check for first down
-            if yards_for_first_down <= 0:
-                down = 1
-                yards_for_first_down = 10
-                continue
-            
-            # Advance down
-            down += 1
-            
-            # Check for turnover on downs
-            if down > 4:
-                # Attempt field goal if in range (inside 45-yard line from goal, increased from 40)
-                if current_field_position >= 55:  # Within field goal range (was 60)
-                    fg_success = self._attempt_field_goal(offense, 100 - current_field_position, is_home)
-                    if fg_success:
-                        result = "field_goal"
-                        points = 3
-                    else:
-                        result = "missed_fg"
-                        points = 0
-                else:
-                    result = "punt"
-                    points = 0
-                break
-        
-        # If we hit max plays limit, punt
-        if plays_in_drive >= max_plays:
-            result = "punt"
-            points = 0
-
-        self.logger.debug(f"{offense.name} drive result: {result} ({points} points) in {plays_in_drive} plays")
-        
-        return {
-            'result': result,
-            'points': points,
-            'plays': plays_in_drive,
-            'final_field_position': current_field_position
-        }
-
     def _simulate_play(self, offense: Team, defense: Team, is_home: bool, down: int, yards_for_first: int, yards_to_goal: int) -> dict:
         """
         Simulate a single play.
@@ -646,22 +541,6 @@ class GameEngine:
         
         return random.random() < success_prob
 
-    def _calculate_drive_probability(self, offense: Team, defense: Team, is_home: bool) -> float:
-        """Calculate the probability of a successful drive."""
-        # Base probability from team ratings
-        off_rating = (offense.stats.offensive_rating + offense.stats.red_zone_efficiency) / 2
-        def_rating = defense.stats.defensive_rating
-        
-        # Home field advantage
-        home_bonus = 0.05 if is_home else 0.0
-        
-        # Calculate relative strength
-        strength_diff = (off_rating - def_rating) / 100.0
-        base_prob = 0.35 + (strength_diff * 0.3) + home_bonus
-        
-        # Keep probability in reasonable bounds
-        return max(0.1, min(0.7, base_prob))
-
     def _simulate_overtime(self, home_team: Team, away_team: Team) -> Tuple[int, int]:
         """
         Simulate overtime period (simplified sudden death).
@@ -676,7 +555,7 @@ class GameEngine:
         second_team = away_team if first_team == home_team else home_team
           # First team's drive (start at 25-yard line for overtime)
         first_is_home = (first_team == home_team)
-        first_drive = self._simulate_drive(first_team, second_team, first_is_home, 25)
+        first_drive = self._simulate_drive_with_time(first_team, second_team, first_is_home, 25, 900)  # 15 minutes max
         
         if first_drive['points'] >= 7:  # Touchdown ends the game
             if first_team == home_team:
@@ -686,35 +565,13 @@ class GameEngine:
         
         # Second team gets a chance (also starts at 25-yard line)
         second_is_home = (second_team == home_team)
-        second_drive = self._simulate_drive(second_team, first_team, second_is_home, 25)
+        second_drive = self._simulate_drive_with_time(second_team, first_team, second_is_home, 25, 900)  # 15 minutes max
         
         # Return points based on which team scored
         if first_team == home_team:
             return first_drive['points'], second_drive['points']
         else:
             return second_drive['points'], first_drive['points']
-
-    def _calculate_success_probability(self, offensive_rating: float, defensive_rating: float) -> float:
-        """Calculate success probability from raw offensive and defensive ratings."""
-        # Calculate relative strength
-        strength_diff = (offensive_rating - defensive_rating) / 100.0
-        base_prob = 0.35 + (strength_diff * 0.3)
-        
-        # Keep probability in reasonable bounds
-        return max(0.1, min(0.8, base_prob))
-    
-    def _calculate_points(self, outcome: str) -> int:
-        """Calculate points for different play outcomes."""
-        points_map = {
-            'touchdown': 7,
-            'field_goal': 3,
-            'safety': 2,
-            'missed_fg': 0,
-            'punt': 0,
-            'failed_in_red_zone': 0,
-            'turnover': 0
-        }
-        return points_map.get(outcome, 0)
 
     def _update_team_records(self, result: GameResult) -> None:
         """Update team win/loss records based on game result."""

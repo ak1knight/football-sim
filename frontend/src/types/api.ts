@@ -62,11 +62,8 @@ export interface GameResult {
   weather: Weather;
   detailed_stats?: {
     total_plays: number;
+    total_drives: number;
     turnovers: {
-      home: number;
-      away: number;
-    };
-    penalties: {
       home: number;
       away: number;
     };
@@ -74,12 +71,45 @@ export interface GameResult {
       home: number;
       away: number;
     };
+    yards_gained: {
+      home: number;
+      away: number;
+    };
+    plays_by_type: {
+      run: number;
+      pass: number;
+      turnover: number;
+    };
+    average_yards_per_play: {
+      home: number;
+      away: number;
+    };
   };
+  drive_summary?: Array<{
+    drive_number: number;
+    quarter: number;
+    offense: string;
+    starting_position: number;
+    result: string;
+    points: number;
+    total_plays: number;
+    total_yards: number;
+    plays: Array<{
+      down: number;
+      yards_to_go: number;
+      play_type: string;
+      yards_gained: number;
+      description: string;
+    }>;
+  }>;
   key_plays?: Array<{
     quarter: number;
     time: string;
     description: string;
     scoring_play: boolean;
+    points?: number;
+    yards?: number;
+    play_type?: string;
   }>;
 }
 
@@ -96,7 +126,7 @@ export interface TeamsResponse {
   error?: string;
 }
 
-export interface ApiResponse<T = any> {
+export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;

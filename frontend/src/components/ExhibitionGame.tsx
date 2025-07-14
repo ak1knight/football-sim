@@ -276,25 +276,87 @@ const ExhibitionGame: React.FC = () => {
 
           {gameResult.detailed_stats && (
             <div className="detailed-stats">
-              <h3>Detailed Statistics</h3>
-              <div className="stats-grid">
-                <div className="stat">
-                  <span>Total Plays:</span>
-                  <span>{gameResult.detailed_stats.total_plays}</span>
-                </div>
-                <div className="stat">
-                  <span>Turnovers:</span>
-                  <span>{gameResult.detailed_stats.turnovers.away} - {gameResult.detailed_stats.turnovers.home}</span>
-                </div>
-                <div className="stat">
-                  <span>Penalties:</span>
-                  <span>{gameResult.detailed_stats.penalties.away} - {gameResult.detailed_stats.penalties.home}</span>
-                </div>
-                <div className="stat">
-                  <span>Time of Possession:</span>
-                  <span>{gameResult.detailed_stats.time_of_possession.away}m - {gameResult.detailed_stats.time_of_possession.home}m</span>
+              <h3>📊 Detailed Statistics</h3>
+              
+              {/* Game Overview Stats */}
+              <div className="stats-section">
+                <h4>Game Overview</h4>
+                <div className="stats-grid">
+                  <div className="stat">
+                    <span>Total Plays:</span>
+                    <span>{gameResult.detailed_stats.total_plays}</span>
+                  </div>
+                  <div className="stat">
+                    <span>Total Drives:</span>
+                    <span>{gameResult.detailed_stats.total_drives}</span>
+                  </div>
+                  <div className="stat">
+                    <span>Turnovers:</span>
+                    <span>{gameResult.detailed_stats.turnovers.away} - {gameResult.detailed_stats.turnovers.home}</span>
+                  </div>
+                  <div className="stat">
+                    <span>Time of Possession:</span>
+                    <span>{gameResult.detailed_stats.time_of_possession.away}m - {gameResult.detailed_stats.time_of_possession.home}m</span>
+                  </div>
                 </div>
               </div>
+
+              {/* Offensive Stats */}
+              <div className="stats-section">
+                <h4>Offensive Statistics</h4>
+                <div className="stats-grid">
+                  <div className="stat">
+                    <span>Total Yards:</span>
+                    <span>{gameResult.detailed_stats.yards_gained.away} - {gameResult.detailed_stats.yards_gained.home}</span>
+                  </div>
+                  <div className="stat">
+                    <span>Avg Yards/Play:</span>
+                    <span>{gameResult.detailed_stats.average_yards_per_play.away} - {gameResult.detailed_stats.average_yards_per_play.home}</span>
+                  </div>
+                  <div className="stat">
+                    <span>Running Plays:</span>
+                    <span>{gameResult.detailed_stats.plays_by_type.run}</span>
+                  </div>
+                  <div className="stat">
+                    <span>Passing Plays:</span>
+                    <span>{gameResult.detailed_stats.plays_by_type.pass}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Drive Summary */}
+              {gameResult.drive_summary && gameResult.drive_summary.length > 0 && (
+                <div className="stats-section">
+                  <h4>Drive Summary</h4>
+                  <div className="drive-summary">
+                    {gameResult.drive_summary.map((drive, index) => (
+                      <div key={index} className={`drive ${drive.points > 0 ? 'scoring-drive' : ''}`}>
+                        <div className="drive-header">
+                          <strong>Q{drive.quarter} - Drive {drive.drive_number}: {drive.offense}</strong>
+                          <span className="drive-result">
+                            {drive.result.replace('_', ' ').toUpperCase()}
+                            {drive.points > 0 && ` (+${drive.points})`}
+                          </span>
+                        </div>
+                        <div className="drive-details">
+                          {drive.total_plays} plays, {drive.total_yards} yards from {drive.starting_position}-yard line
+                        </div>
+                        
+                        {/* Show plays for scoring drives */}
+                        {drive.points > 0 && drive.plays.length > 0 && (
+                          <div className="drive-plays">
+                            {drive.plays.slice(-3).map((play, playIndex) => (
+                              <div key={playIndex} className="play-detail">
+                                {play.description}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

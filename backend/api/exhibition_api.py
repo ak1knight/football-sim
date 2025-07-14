@@ -5,7 +5,7 @@ This API allows users to simulate games between any two teams
 with customizable conditions like weather.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from flask import Blueprint, request, jsonify
 import sys
 import os
@@ -124,9 +124,14 @@ def simulate_exhibition_game():
         
         # Parse game settings
         game_settings = data.get('game_settings', {})
+        detailed_stats_requested = game_settings.get('detailed_stats', False)
         
         # Create and run the game simulation
-        game_engine = GameEngine(weather=weather)
+        game_engine = GameEngine(
+            weather=weather, 
+            enable_reporting=detailed_stats_requested,
+            verbose=False
+        )
         
         # Run the simulation
         result = game_engine.simulate_game(home_team, away_team)
@@ -162,11 +167,9 @@ def simulate_exhibition_game():
         
         # Add detailed stats if requested
         if game_settings.get('detailed_stats', False):
-            response_data['game_result']['detailed_stats'] = _format_detailed_stats(result)
-        
-        # Add play-by-play if available
-        if hasattr(result, 'plays') and result.plays:
-            response_data['game_result']['key_plays'] = _format_key_plays(result.plays[:10])  # Top 10 plays
+            response_data['game_result']['detailed_stats'] = _format_detailed_stats(game_engine, result)
+            response_data['game_result']['drive_summary'] = _format_drive_summary(game_engine)
+            response_data['game_result']['key_plays'] = _format_key_plays(game_engine)
         
         return jsonify(response_data)
     
@@ -247,38 +250,167 @@ def _determine_winner(result, home_team, away_team) -> Dict[str, Any]:
         }
 
 
-def _format_detailed_stats(result) -> Dict[str, Any]:
-    """Format detailed game statistics."""
+def _format_detailed_stats(game_engine, result) -> Dict[str, Any]:
+    """Format detailed game statistics from the game reporter."""
+    if not game_engine.reporter or not game_engine.reporter.current_game:
+        # Fallback to basic stats if no reporter data
+        return {
+            'total_plays': 0,
+            'total_drives': 0,
+            'turnovers': {'home': 0, 'away': 0},
+            'time_of_possession': {'home': 30, 'away': 30},
+            'yards_gained': {'home': 0, 'away': 0},
+            'plays_by_type': {'run': 0, 'pass': 0, 'turnover': 0}
+        }
+    
+    game_report = game_engine.reporter.current_game
+    
+    # Initialize counters
+    total_plays = 0
+    total_drives = 0
+    home_yards = 0
+    away_yards = 0
+    home_plays = 0
+    away_plays = 0
+    home_turnovers = 0
+    away_turnovers = 0
+    
+    play_type_counts = {'run': 0, 'pass': 0, 'turnover': 0}
+    
+    # Analyze all drives
+    for quarter in game_report.quarters:
+        for drive in quarter.drives:
+            total_drives += 1
+            
+            # Determine if this is a home or away drive
+            is_home_drive = (drive.offense == game_report.home_team)
+            
+            for play in drive.plays:
+                total_plays += 1
+                
+                # Count plays by team
+                if is_home_drive:
+                    home_plays += 1
+                    home_yards += play.yards_gained
+                else:
+                    away_plays += 1
+                    away_yards += play.yards_gained
+                
+                # Count play types
+                if play.play_type in play_type_counts:
+                    play_type_counts[play.play_type] += 1
+                
+                # Count turnovers
+                if play.play_type == 'turnover':
+                    if is_home_drive:
+                        home_turnovers += 1
+                    else:
+                        away_turnovers += 1
+    
+    # Calculate time of possession (simplified estimate based on plays)
+    total_game_plays = max(home_plays + away_plays, 1)
+    home_top_percentage = home_plays / total_game_plays
+    home_top_minutes = round(home_top_percentage * 60)
+    away_top_minutes = 60 - home_top_minutes
+    
     return {
-        'total_plays': getattr(result, 'total_plays', 0),
+        'total_plays': total_plays,
+        'total_drives': total_drives,
         'turnovers': {
-            'home': getattr(result, 'home_turnovers', 0),
-            'away': getattr(result, 'away_turnovers', 0)
-        },
-        'penalties': {
-            'home': getattr(result, 'home_penalties', 0),
-            'away': getattr(result, 'away_penalties', 0)
+            'home': home_turnovers,
+            'away': away_turnovers
         },
         'time_of_possession': {
-            'home': getattr(result, 'home_top_minutes', 30),
-            'away': getattr(result, 'away_top_minutes', 30)
+            'home': home_top_minutes,
+            'away': away_top_minutes
+        },
+        'yards_gained': {
+            'home': home_yards,
+            'away': away_yards
+        },
+        'plays_by_type': play_type_counts,
+        'average_yards_per_play': {
+            'home': round(home_yards / max(home_plays, 1), 1),
+            'away': round(away_yards / max(away_plays, 1), 1)
         }
     }
 
 
-def _format_key_plays(plays) -> list:
-    """Format key plays for the response."""
-    formatted_plays = []
+def _format_drive_summary(game_engine) -> List[Dict[str, Any]]:
+    """Format drive summary from the game reporter."""
+    if not game_engine.reporter or not game_engine.reporter.current_game:
+        return []
     
-    for play in plays:
-        formatted_plays.append({
-            'quarter': getattr(play, 'quarter', 1),
-            'time': getattr(play, 'time_remaining', '15:00'),
-            'description': getattr(play, 'description', 'Play occurred'),
-            'scoring_play': getattr(play, 'is_scoring_play', False)
-        })
+    game_report = game_engine.reporter.current_game
+    drive_summary = []
     
-    return formatted_plays
+    drive_count = 0
+    for quarter in game_report.quarters:
+        for drive in quarter.drives:
+            drive_count += 1
+            
+            drive_summary.append({
+                'drive_number': drive_count,
+                'quarter': quarter.quarter,
+                'offense': drive.offense,
+                'starting_position': drive.starting_position,
+                'result': drive.result,
+                'points': drive.points,
+                'total_plays': drive.total_plays,
+                'total_yards': drive.total_yards,
+                'plays': [
+                    {
+                        'down': play.down,
+                        'yards_to_go': play.yards_to_go,
+                        'play_type': play.play_type,
+                        'yards_gained': play.yards_gained,
+                        'description': play.description
+                    }
+                    for play in drive.plays
+                ]
+            })
+    
+    return drive_summary
+
+
+def _format_key_plays(game_engine) -> List[Dict[str, Any]]:
+    """Format key plays for the response from the game reporter."""
+    if not game_engine.reporter or not game_engine.reporter.current_game:
+        return []
+    
+    game_report = game_engine.reporter.current_game
+    key_plays = []
+    
+    # Find scoring plays and big plays
+    for quarter in game_report.quarters:
+        for drive in quarter.drives:
+            # Add scoring drive summary as a key play
+            if drive.points > 0:
+                key_plays.append({
+                    'quarter': quarter.quarter,
+                    'time': '??:??',  # Time tracking not implemented yet
+                    'description': f"{drive.offense} {drive.result.replace('_', ' ').title()} - {drive.points} points ({drive.total_plays} plays, {drive.total_yards} yards)",
+                    'scoring_play': True,
+                    'points': drive.points
+                })
+            
+            # Add big plays (15+ yards or turnovers)
+            for play in drive.plays:
+                if play.yards_gained >= 15 or play.play_type == 'turnover':
+                    key_plays.append({
+                        'quarter': quarter.quarter,
+                        'time': '??:??',  # Time tracking not implemented yet
+                        'description': f"{drive.offense}: {play.description}",
+                        'scoring_play': False,
+                        'yards': play.yards_gained,
+                        'play_type': play.play_type
+                    })
+    
+    # Sort by importance (scoring plays first, then by yards gained)
+    key_plays.sort(key=lambda x: (not x['scoring_play'], -x.get('yards', 0)))
+    
+    # Return top 10 plays
+    return key_plays[:10]
 
 
 # Error handlers
