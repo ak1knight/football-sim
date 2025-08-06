@@ -71,10 +71,10 @@ class TestSeasonEngine:
         # Should have games scheduled
         assert len(season_engine.schedule) > 0
         
-        # All games should be for weeks 1-17
+        # All games should be for weeks 1-18
         weeks = [game.week for game in season_engine.schedule]
         assert min(weeks) >= 1
-        assert max(weeks) <= 17
+        assert max(weeks) <= 18
         
         # All games should start as scheduled
         for game in season_engine.schedule:

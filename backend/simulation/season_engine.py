@@ -8,13 +8,16 @@ from individual game simulation.
 
 import random
 from dataclasses import dataclass, field
-from typing import List, Dict, Tuple, Optional, Set
+from typing import List, Dict, Tuple, Optional, Set, TYPE_CHECKING
 from enum import Enum
 from collections import defaultdict
 from datetime import datetime, timedelta
 
 from models.team import Team
 from simulation.schedule_generators import ScheduleGenerator, NFLScheduleGenerator
+
+if TYPE_CHECKING:
+    from simulation.playoff_engine import PlayoffEngine
 
 
 class GameStatus(Enum):
@@ -150,7 +153,7 @@ class SeasonEngine:
     and provides clean APIs for frontend integration.
     """
     
-    def __init__(self, teams: List[Team], season_year: int = 2024, seed: Optional[int] = None, 
+    def __init__(self, teams: List[Team], season_year: int = 2024, seed: Optional[int] = None,
                  schedule_generator: Optional[ScheduleGenerator] = None):
         """
         Initialize the season engine.
@@ -179,6 +182,9 @@ class SeasonEngine:
         self.schedule: List[ScheduledGame] = []
         self.records: Dict[str, TeamRecord] = {}
         self.completed_games: List[ScheduledGame] = []
+        
+        # Playoff engine (initialized when playoffs start)
+        self.playoff_engine: Optional['PlayoffEngine'] = None
         
         # Initialize team records
         for team in teams:
@@ -361,6 +367,7 @@ class SeasonEngine:
             # Check if regular season is complete
             if self.current_week > self.schedule_generator.get_total_weeks():
                 self.current_phase = SeasonPhase.PLAYOFFS
+                self._initialize_playoffs()
     
     def get_standings(self, by_division: bool = True) -> Dict:
         """
@@ -422,6 +429,9 @@ class SeasonEngine:
         completed_games = len(self.completed_games)
         total_weeks = self.schedule_generator.get_total_weeks()
         
+        # Count all scheduled games (not just next 16)
+        scheduled_games = sum(1 for game in self.schedule if game.status == GameStatus.SCHEDULED)
+        
         return {
             'season_year': self.season_year,
             'current_week': self.current_week,
@@ -429,7 +439,7 @@ class SeasonEngine:
             'total_games': total_games,
             'completed_games': completed_games,
             'completion_percentage': round((completed_games / total_games) * 100, 1) if total_games > 0 else 0,
-            'next_games_count': len(self.get_next_games()),
+            'next_games_count': scheduled_games,
             'weeks_remaining': max(0, total_weeks - self.current_week + 1) if self.current_phase == SeasonPhase.REGULAR_SEASON else 0,
             'schedule_type': self.schedule_generator.get_schedule_name() if hasattr(self.schedule_generator, 'get_schedule_name') else 'Custom Schedule'
         }
@@ -514,3 +524,94 @@ class SeasonEngine:
                 leaders.append(leader_dict)
         
         return leaders
+    
+    def _initialize_playoffs(self) -> None:
+        """Initialize playoff engine when regular season ends."""
+        try:
+            # Import here to avoid circular imports
+            from simulation.playoff_engine import PlayoffEngine
+            
+            self.playoff_engine = PlayoffEngine(self)
+            if self.playoff_engine:
+                self.playoff_engine.generate_playoff_bracket()
+        except ImportError:
+            # Fallback if playoff engine not available
+            pass
+    
+    def get_playoff_bracket(self) -> Optional[Dict]:
+        """
+        Get the current playoff bracket.
+        
+        Returns:
+            Playoff bracket data or None if not in playoffs
+        """
+        if self.current_phase != SeasonPhase.PLAYOFFS or not self.playoff_engine:
+            return None
+        
+        return self.playoff_engine.get_bracket_status()
+    
+    def get_next_playoff_games(self) -> List[Dict]:
+        """
+        Get the next playoff games that can be played.
+        
+        Returns:
+            List of playoff games ready to be played
+        """
+        if self.current_phase != SeasonPhase.PLAYOFFS or not self.playoff_engine:
+            return []
+        
+        games = self.playoff_engine.get_next_playoff_games()
+        return [game.to_dict() for game in games]
+    
+    def process_playoff_game_result(self, game_id: str, home_score: int, away_score: int,
+                                  overtime: bool = False) -> bool:
+        """
+        Process a playoff game result.
+        
+        Args:
+            game_id: Playoff game identifier
+            home_score: Home team score
+            away_score: Away team score
+            overtime: Whether game went to overtime
+            
+        Returns:
+            True if game was processed successfully
+        """
+        if self.current_phase != SeasonPhase.PLAYOFFS or not self.playoff_engine:
+            return False
+        
+        # Determine winner
+        if home_score > away_score:
+            # Find home team from game
+            playoff_games = self.playoff_engine.get_next_playoff_games()
+            game = next((g for g in playoff_games if g.game_id == game_id), None)
+            if not game or not game.home_team:
+                return False
+            winner = game.home_team
+        elif away_score > home_score:
+            # Find away team from game
+            playoff_games = self.playoff_engine.get_next_playoff_games()
+            game = next((g for g in playoff_games if g.game_id == game_id), None)
+            if not game or not game.away_team:
+                return False
+            winner = game.away_team
+        else:
+            # Tie games not allowed in playoffs - this shouldn't happen
+            return False
+        
+        # Process the result
+        return self.playoff_engine.advance_bracket(game_id, winner, home_score, away_score, overtime)
+    
+    def is_season_complete(self) -> bool:
+        """
+        Check if the entire season (including playoffs) is complete.
+        
+        Returns:
+            True if season is completely finished
+        """
+        if self.current_phase == SeasonPhase.PLAYOFFS:
+            return self.playoff_engine.is_playoffs_complete() if self.playoff_engine else False
+        elif self.current_phase == SeasonPhase.OFFSEASON:
+            return True
+        else:
+            return False

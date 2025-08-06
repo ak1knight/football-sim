@@ -121,7 +121,7 @@ class SeasonAPI:
         Get all games for a specific week.
         
         Args:
-            week: Week number (1-17 for regular season)
+            week: Week number (1-18 for regular season)
             
         Returns:
             List of games for the specified week
@@ -374,7 +374,7 @@ class SeasonAPI:
         Get all games that need to be simulated through a target week.
         
         Args:
-            target_week: Week to simulate through (1-17)
+            target_week: Week to simulate through (1-18)
             
         Returns:
             List of games to simulate in order
@@ -386,10 +386,10 @@ class SeasonAPI:
             }
         
         try:
-            if target_week < 1 or target_week > 17:
+            if target_week < 1 or target_week > 18:
                 return {
                     'success': False,
-                    'error': 'Week must be between 1 and 17'
+                    'error': 'Week must be between 1 and 18'
                 }
             
             if target_week < self.current_season.current_week:
@@ -417,4 +417,138 @@ class SeasonAPI:
             return {
                 'success': False,
                 'error': f'Failed to get simulation plan: {str(e)}'
+            }
+    
+    def get_playoff_bracket(self) -> Dict[str, Any]:
+        """
+        Get the current playoff bracket.
+        
+        Returns:
+            Complete playoff bracket with all rounds and matchups
+        """
+        if not self.current_season:
+            return {
+                'success': False,
+                'error': 'No active season'
+            }
+        
+        try:
+            bracket = self.current_season.get_playoff_bracket()
+            
+            if not bracket:
+                return {
+                    'success': True,
+                    'message': 'Playoffs not yet available',
+                    'current_phase': self.current_season.current_phase.value,
+                    'playoff_picture': self.current_season.get_playoff_picture()
+                }
+            
+            return {
+                'success': True,
+                'bracket': bracket,
+                'current_phase': self.current_season.current_phase.value
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Failed to get playoff bracket: {str(e)}'
+            }
+    
+    def get_next_playoff_games(self) -> Dict[str, Any]:
+        """
+        Get the next playoff games that can be played.
+        
+        Returns:
+            List of playoff games ready for simulation
+        """
+        if not self.current_season:
+            return {
+                'success': False,
+                'error': 'No active season'
+            }
+        
+        try:
+            games = self.current_season.get_next_playoff_games()
+            
+            return {
+                'success': True,
+                'games': games,
+                'count': len(games),
+                'current_phase': self.current_season.current_phase.value
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Failed to get next playoff games: {str(e)}'
+            }
+    
+    def simulate_playoff_game(self, game_id: str, home_score: int, away_score: int,
+                             overtime: bool = False) -> Dict[str, Any]:
+        """
+        Submit the result of a completed playoff game.
+        
+        Args:
+            game_id: Playoff game identifier
+            home_score: Home team's final score
+            away_score: Away team's final score
+            overtime: Whether game went to overtime
+            
+        Returns:
+            Confirmation of result processing and updated bracket status
+        """
+        if not self.current_season:
+            return {
+                'success': False,
+                'error': 'No active season'
+            }
+        
+        try:
+            # Validate scores
+            if home_score < 0 or away_score < 0:
+                return {
+                    'success': False,
+                    'error': 'Scores cannot be negative'
+                }
+            
+            if home_score == away_score:
+                return {
+                    'success': False,
+                    'error': 'Playoff games cannot end in ties'
+                }
+            
+            # Process the playoff game result
+            success = self.current_season.process_playoff_game_result(
+                game_id=game_id,
+                home_score=home_score,
+                away_score=away_score,
+                overtime=overtime
+            )
+            
+            if not success:
+                return {
+                    'success': False,
+                    'error': f'Playoff game {game_id} not found or could not be processed'
+                }
+            
+            # Get updated bracket status
+            bracket_status = self.current_season.get_playoff_bracket()
+            
+            return {
+                'success': True,
+                'message': f'Playoff game {game_id} result processed successfully',
+                'game_result': {
+                    'game_id': game_id,
+                    'home_score': home_score,
+                    'away_score': away_score,
+                    'overtime': overtime
+                },
+                'bracket_status': bracket_status
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Failed to process playoff game result: {str(e)}'
             }

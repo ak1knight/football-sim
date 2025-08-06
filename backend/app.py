@@ -14,6 +14,8 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from api.exhibition_api import exhibition_bp
+from api.teams_blueprint import teams_bp
+from api.season_blueprint import season_bp
 
 
 def create_app():
@@ -25,6 +27,8 @@ def create_app():
     
     # Register blueprints
     app.register_blueprint(exhibition_bp, url_prefix='/api/exhibition')
+    app.register_blueprint(teams_bp, url_prefix='/api/teams')
+    app.register_blueprint(season_bp, url_prefix='/api/season')
     
     # Root endpoint
     @app.route('/')
@@ -34,7 +38,9 @@ def create_app():
             'version': '1.0.0',
             'status': 'running',
             'endpoints': {
-                'exhibition': '/api/exhibition'
+                'exhibition': '/api/exhibition',
+                'teams': '/api/teams',
+                'season': '/api/season'
             }
         })
     

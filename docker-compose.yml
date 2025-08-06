@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: football-sim-postgres
+    environment:
+      POSTGRES_DB: football_sim
+      POSTGRES_USER: football_user
+      POSTGRES_PASSWORD: football_dev_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U football_user -d football_sim"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: football-sim-postgres-test
+    environment:
+      POSTGRES_DB: football_sim_test
+      POSTGRES_USER: football_test_user
+      POSTGRES_PASSWORD: football_test_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U football_test_user -d football_sim_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend service (for future integration)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: football-sim-backend
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABASE_URL=postgresql://football_user:football_dev_password@postgres:5432/football_sim
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: python app.py
+    profiles:
+      - full-stack  # Only start when using full-stack profile
+
+volumes:
+  postgres_data:
+    name: football_sim_postgres_data
+  postgres_test_data:
+    name: football_sim_postgres_test_data
+
+networks:
+  default:
+    name: football-sim-network

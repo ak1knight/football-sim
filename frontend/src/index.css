@@ -1,68 +1,76 @@
-:root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
-}
-
-body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
-}
-
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
+/* Custom styles for Football Manager-inspired UI */
+@layer base {
+  body {
+    @apply bg-secondary-900 text-secondary-100 font-sans;
   }
-  a:hover {
-    color: #747bff;
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 rounded-md font-medium transition-colors;
   }
-  button {
-    background-color: #f9f9f9;
+  
+  .btn-secondary {
+    @apply bg-secondary-600 hover:bg-secondary-700 text-white px-4 py-2 rounded-md font-medium transition-colors;
+  }
+  
+  .card {
+    @apply bg-secondary-800 rounded-lg border border-secondary-700 shadow-lg;
+  }
+  
+  .sidebar-item {
+    @apply flex items-center px-4 py-3 text-secondary-300 hover:text-white hover:bg-secondary-800 transition-colors cursor-pointer;
+  }
+  
+  .sidebar-item.active {
+    @apply text-white bg-primary-600;
+  }
+  
+  .tab-item {
+    @apply px-4 py-2 font-medium text-secondary-400 hover:text-white border-b-2 border-transparent hover:border-primary-500 transition-colors cursor-pointer;
+  }
+  
+  .tab-item.active {
+    @apply text-white border-primary-500;
+  }
+  
+  .stat-row {
+    @apply flex justify-between items-center py-2 border-b border-secondary-800 last:border-b-0;
+  }
+  
+  .stat-label {
+    @apply text-secondary-300 font-medium;
+  }
+  
+  .stat-value {
+    @apply text-white font-semibold;
+  }
+  
+  .stat-comparison {
+    @apply flex items-center space-x-4;
+  }
+  
+  .scoring-play {
+    @apply bg-green-900/20 border-l-4 border-green-500 text-green-100;
+  }
+  
+  .big-play {
+    @apply bg-blue-900/20 border-l-4 border-blue-500 text-blue-100;
+  }
+  
+  .drive-table {
+    @apply w-full text-sm border-collapse;
+  }
+  
+  .drive-table th {
+    @apply text-left text-secondary-300 font-medium py-3 px-2 border-b border-secondary-700;
+  }
+  
+  .drive-table td {
+    @apply py-2 px-2 border-b border-secondary-800;
   }
 }
