@@ -1,17 +1,21 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { observer } from 'mobx-react-lite';
-import { appStore } from './stores';
-import { 
-  Layout, 
-  ExhibitionGame, 
-  SeasonManagement, 
-  TeamManagement, 
-  LeagueManagement, 
-  UserSettings 
+import { StoresProvider, StoresContext } from './stores';
+import { useContext } from 'react';
+import { AuthForm } from './components/AuthForm';
+import {
+  Layout,
+  ExhibitionGame,
+  SeasonManagement,
+  TeamManagement,
+  LeagueManagement,
+  UserSettings
 } from './components';
 
 const AppRoutes: React.FC = observer(() => {
+  const { appStore } = useContext(StoresContext);
+
   // Update app store when route changes
   useEffect(() => {
     const path = window.location.pathname;
@@ -19,7 +23,7 @@ const AppRoutes: React.FC = observer(() => {
     if (section !== appStore.currentSection) {
       appStore.setCurrentSection(section as any);
     }
-  }, []);
+  }, [appStore]);
 
   // Listen for store changes and update URL
   useEffect(() => {
@@ -44,14 +48,17 @@ const AppRoutes: React.FC = observer(() => {
   );
 });
 
-const App: React.FC = () => {
+const App: React.FC = observer(() => {
+  const { userStore } = useContext(StoresContext);
   return (
-    <Router>
-      <div className="App">
-        <AppRoutes />
-      </div>
-    </Router>
+    <StoresProvider>
+      <Router>
+        <div className="App">
+          {userStore.isAuthenticated ? <AppRoutes /> : <AuthForm />}
+        </div>
+      </Router>
+    </StoresProvider>
   );
-};
+});
 
 export default App;

@@ -2,174 +2,311 @@
 Season management API for the football simulation engine.
 
 Provides REST API endpoints for season management, scheduling,
-standings tracking, and game result processing.
+standings tracking, and game result processing using database storage.
 """
 
 from typing import Dict, List, Optional, Any
-from dataclasses import asdict
+import logging
+from flask import current_app
 
-from simulation.season_engine import SeasonEngine, SeasonPhase, GameStatus
-from data.team_loader import load_sample_teams
+from database.connection import get_db_manager
+from database.dao import SeasonDAO, SeasonTeamDAO, SeasonGameDAO, TeamDAO
 
+from .season_formatters import (
+    format_season_summary,
+    format_season_details,
+    format_game,
+    format_team_record,
+)
+from .season_services import (
+    generate_season_schedule,
+    get_team_season_info,
+    get_season_game_count,
+    get_completed_game_count,
+)
 
 class SeasonAPI:
     """
-    REST API for season management.
+    REST API for season management using database storage.
     
     Handles season creation, game scheduling, result processing,
-    and standings queries for frontend integration.
+    and standings queries with persistent database storage.
     """
     
     def __init__(self):
         """Initialize the Season API."""
-        self.current_season: Optional[SeasonEngine] = None
-        self.teams = load_sample_teams()
+        # Use Flask's app logger via current_app in methods
+        self.logger = None  # Deprecated, use current_app.logger instead
     
-    def create_season(self, season_year: int = 2024, seed: Optional[int] = None) -> Dict[str, Any]:
+    def create_season(self, user_id: str, season_name: str, season_year: int = 2024,
+                     selected_teams: Optional[List[str]] = None) -> Dict[str, Any]:
         """
-        Create a new season.
-        
-        Args:
-            season_year: Year for the season
-            seed: Random seed for reproducible scheduling
-            
+        Create a new season for a user.
+
+        Parameters:
+            user_id (str): ID of the user creating the season.
+            season_name (str): Name for the season.
+            season_year (int, optional): Year for the season. Defaults to 2024.
+            selected_teams (Optional[List[str]], optional): List of team IDs to include. Defaults to all NFL teams.
+
         Returns:
-            Season creation confirmation and initial status
+            Dict[str, Any]: Season creation confirmation and initial status.
         """
         try:
-            self.current_season = SeasonEngine(
-                teams=self.teams,
+            db_manager = get_db_manager()
+            if not db_manager:
+                return {"success": False, "error": "Database connection not available"}
+            
+            season_dao = SeasonDAO(db_manager)
+            season_team_dao = SeasonTeamDAO(db_manager)
+            team_dao = TeamDAO(db_manager)
+            
+            # Create the season
+            season_id = season_dao.create_season(
+                user_id=user_id,
+                season_name=season_name,
                 season_year=season_year,
-                seed=seed
+                total_weeks=18,
+                current_week=1,
+                phase='regular_season'
             )
+            
+            # Get teams to include in season
+            if selected_teams:
+                teams = []
+                for team_id in selected_teams:
+                    team = team_dao.get_by_id(team_id)
+                    if team:
+                        teams.append(team)
+            else:
+                # Default to all NFL teams
+                teams = team_dao.get_all()
+            
+            if len(teams) < 2:
+                return {"success": False, "error": "Season must have at least 2 teams"}
+            
+            # Add teams to season
+            team_ids = [team['id'] for team in teams]
+            season_team_dao.bulk_add_teams_to_season(season_id, team_ids)
+            
+            # Generate and create game schedule
+            schedule_success = generate_season_schedule(season_id, teams)
+            if not schedule_success:
+                return {"success": False, "error": "Failed to generate season schedule"}
+            
+            # Get created season with teams
+            season = season_dao.get_season_with_teams(season_id)
             
             return {
                 'success': True,
-                'message': f'Season {season_year} created successfully',
-                'season_status': self.current_season.get_season_status(),
-                'total_teams': len(self.teams),
-                'total_games': len(self.current_season.schedule)
+                'message': f'Season "{season_name}" created successfully',
+                'season': format_season_summary(season) if season else None,
+                'total_teams': len(teams),
+                'total_games': get_season_game_count(season_id)
             }
             
         except Exception as e:
+            current_app.logger.error(f"Error creating season: {str(e)}")
             return {
                 'success': False,
                 'error': f'Failed to create season: {str(e)}'
             }
     
-    def get_season_status(self) -> Dict[str, Any]:
+    def get_user_seasons(self, user_id: str, active_only: bool = False) -> Dict[str, Any]:
         """
-        Get current season status.
-        
+        Retrieve all seasons for a user.
+
+        Parameters:
+            user_id (str): User ID.
+            active_only (bool, optional): If True, only return non-completed seasons.
+
         Returns:
-            Current season information and progress
+            Dict[str, Any]: List of user's seasons.
         """
-        if not self.current_season:
-            return {
-                'success': False,
-                'error': 'No active season'
-            }
-        
         try:
-            status = self.current_season.get_season_status()
+            db_manager = get_db_manager()
+            if not db_manager:
+                return {"success": False, "error": "Database connection not available"}
+            
+            season_dao = SeasonDAO(db_manager)
+            seasons = season_dao.get_user_seasons(user_id, active_only=active_only)
+            
+            formatted_seasons = []
+            for season in seasons:
+                formatted_seasons.append(format_season_summary(season))
             
             return {
                 'success': True,
-                'season_status': status
+                'seasons': formatted_seasons,
+                'count': len(formatted_seasons)
             }
             
         except Exception as e:
+            current_app.logger.error(f"Error getting user seasons: {str(e)}")
+            return {
+                'success': False,
+                'error': f'Failed to get seasons: {str(e)}'
+            }
+    
+    def get_season_status(self, season_id: str, user_id: str) -> Dict[str, Any]:
+        """
+        Get the current status of a season.
+
+        Parameters:
+            season_id (str): Season ID.
+            user_id (str): User ID (for authorization).
+
+        Returns:
+            Dict[str, Any]: Current season information and progress.
+        """
+        try:
+            db_manager = get_db_manager()
+            if not db_manager:
+                return {"success": False, "error": "Database connection not available"}
+            
+            season_dao = SeasonDAO(db_manager)
+            season = season_dao.get_by_id(season_id)
+            
+            if not season:
+                return {"success": False, "error": "Season not found"}
+            
+            current_app.logger.info(f"Season found: {season}")
+            current_app.logger.info(f"User ID: {user_id}, Season User ID: {season['user_id']}")
+            if str(season['user_id']) != str(user_id):
+                return {"success": False, "error": "Access denied"}
+            
+            # Get detailed season information
+            season_with_teams = season_dao.get_season_with_teams(season_id)
+            game_count = get_season_game_count(season_id)
+            completed_games = get_completed_game_count(season_id)
+            
+            return {
+                'success': True,
+                'season': format_season_details(season_with_teams) if season_with_teams else None,
+                'progress': {
+                    'games_completed': completed_games,
+                    'total_games': game_count,
+                    'completion_percentage': round((completed_games / game_count * 100) if game_count > 0 else 0, 1)
+                }
+            }
+            
+        except Exception as e:
+            current_app.logger.error(f"Error getting season status: {str(e)}")
             return {
                 'success': False,
                 'error': f'Failed to get season status: {str(e)}'
             }
     
-    def get_next_games(self, limit: int = 16) -> Dict[str, Any]:
+    def get_next_games(self, season_id: str, user_id: str, limit: int = 16) -> Dict[str, Any]:
         """
-        Get next games that need to be simulated.
-        
-        Args:
-            limit: Maximum number of games to return
-            
+        Get the next games that need to be simulated.
+
+        Parameters:
+            season_id (str): Season ID.
+            user_id (str): User ID (for authorization).
+            limit (int, optional): Maximum number of games to return. Defaults to 16.
+
         Returns:
-            List of games ready for simulation
+            Dict[str, Any]: List of games ready for simulation.
         """
-        if not self.current_season:
-            return {
-                'success': False,
-                'error': 'No active season'
-            }
-        
         try:
-            next_games = self.current_season.get_next_games(limit)
+            db_manager = get_db_manager()
+            if not db_manager:
+                return {"success": False, "error": "Database connection not available"}
+            
+            # Verify user access
+            if not self._verify_season_access(season_id, user_id):
+                return {"success": False, "error": "Season not found or access denied"}
+            
+            season_game_dao = SeasonGameDAO(db_manager)
+            upcoming_games = season_game_dao.get_upcoming_games(season_id, limit=limit)
+            
+            formatted_games = []
+            for game in upcoming_games:
+                formatted_games.append(format_game(game))
             
             return {
                 'success': True,
-                'games': [game.to_dict() for game in next_games],
-                'count': len(next_games),
-                'current_week': self.current_season.current_week
+                'games': formatted_games,
+                'count': len(formatted_games)
             }
             
         except Exception as e:
+            current_app.logger.error(f"Error getting next games: {str(e)}")
             return {
                 'success': False,
                 'error': f'Failed to get next games: {str(e)}'
             }
     
-    def get_week_games(self, week: int) -> Dict[str, Any]:
+    def get_week_games(self, season_id: str, user_id: str, week: int) -> Dict[str, Any]:
         """
         Get all games for a specific week.
-        
-        Args:
-            week: Week number (1-18 for regular season)
-            
+
+        Parameters:
+            season_id (str): Season ID.
+            user_id (str): User ID (for authorization).
+            week (int): Week number (1-18 for regular season).
+
         Returns:
-            List of games for the specified week
+            Dict[str, Any]: List of games for the specified week.
         """
-        if not self.current_season:
-            return {
-                'success': False,
-                'error': 'No active season'
-            }
-        
         try:
-            week_games = self.current_season.get_week_games(week)
+            db_manager = get_db_manager()
+            if not db_manager:
+                return {"success": False, "error": "Database connection not available"}
+            
+            # Verify user access
+            if not self._verify_season_access(season_id, user_id):
+                return {"success": False, "error": "Season not found or access denied"}
+            
+            season_game_dao = SeasonGameDAO(db_manager)
+            week_games = season_game_dao.get_season_games(season_id, week=week)
+            
+            formatted_games = []
+            for game in week_games:
+                formatted_games.append(format_game(game))
             
             return {
                 'success': True,
                 'week': week,
-                'games': [game.to_dict() for game in week_games],
-                'count': len(week_games)
+                'games': formatted_games,
+                'count': len(formatted_games)
             }
             
         except Exception as e:
+            current_app.logger.error(f"Error getting week games: {str(e)}")
             return {
                 'success': False,
                 'error': f'Failed to get week {week} games: {str(e)}'
             }
     
-    def submit_game_result(self, game_id: str, home_score: int, away_score: int,
-                          overtime: bool = False, game_duration: int = 60) -> Dict[str, Any]:
+    def submit_game_result(self, season_id: str, user_id: str, game_id: str,
+                          home_score: int, away_score: int, overtime: bool = False,
+                          game_stats: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Submit the result of a completed game.
-        
-        Args:
-            game_id: Unique game identifier
-            home_score: Home team's final score
-            away_score: Away team's final score
-            overtime: Whether game went to overtime
-            game_duration: Game duration in minutes
-            
+
+        Parameters:
+            season_id (str): Season ID.
+            user_id (str): User ID (for authorization).
+            game_id (str): Unique game identifier.
+            home_score (int): Home team's final score.
+            away_score (int): Away team's final score.
+            overtime (bool, optional): Whether game went to overtime.
+            game_stats (Optional[Dict[str, Any]], optional): Optional detailed game statistics.
+
         Returns:
-            Confirmation of result processing and updated standings
+            Dict[str, Any]: Confirmation of result processing and updated standings.
         """
-        if not self.current_season:
-            return {
-                'success': False,
-                'error': 'No active season'
-            }
-        
         try:
+            db_manager = get_db_manager()
+            if not db_manager:
+                return {"success": False, "error": "Database connection not available"}
+            
+            # Verify user access
+            if not self._verify_season_access(season_id, user_id):
+                return {"success": False, "error": "Season not found or access denied"}
+            
             # Validate scores
             if home_score < 0 or away_score < 0:
                 return {
@@ -177,378 +314,185 @@ class SeasonAPI:
                     'error': 'Scores cannot be negative'
                 }
             
-            # Process the game result
-            success = self.current_season.process_game_result(
-                game_id=game_id,
-                home_score=home_score,
-                away_score=away_score,
-                overtime=overtime,
-                game_duration=game_duration
+            season_game_dao = SeasonGameDAO(db_manager)
+            season_team_dao = SeasonTeamDAO(db_manager)
+            
+            # Get the game
+            game = season_game_dao.get_by_id(game_id)
+            if not game:
+                return {"success": False, "error": "Game not found"}
+            
+            if game['status'] != 'scheduled':
+                return {"success": False, "error": "Game already completed"}
+            
+            # Update game result
+            success = season_game_dao.update_game_result(
+                game_id, home_score, away_score, game_stats
             )
             
             if not success:
-                return {
-                    'success': False,
-                    'error': f'Game {game_id} not found or already completed'
-                }
+                return {"success": False, "error": "Failed to update game result"}
             
-            # Get updated season status
-            season_status = self.current_season.get_season_status()
+            # Update team records
+            home_won = home_score > away_score
+            away_won = away_score > home_score
             
-            return {
-                'success': True,
-                'message': f'Game {game_id} result processed successfully',
-                'game_result': {
-                    'game_id': game_id,
-                    'home_score': home_score,
-                    'away_score': away_score,
-                    'overtime': overtime,
-                    'duration': game_duration
-                },
-                'season_status': season_status
-            }
+            # Check if this is a division/conference game
+            home_team_data = get_team_season_info(season_id, game['home_team_id'])
+            away_team_data = get_team_season_info(season_id, game['away_team_id'])
             
-        except Exception as e:
-            return {
-                'success': False,
-                'error': f'Failed to process game result: {str(e)}'
-            }
-    
-    def get_standings(self, by_division: bool = True) -> Dict[str, Any]:
-        """
-        Get current league standings.
-        
-        Args:
-            by_division: Whether to organize by division (True) or conference (False)
+            is_division = bool(home_team_data and away_team_data and
+                              home_team_data.get('team_conference') == away_team_data.get('team_conference') and
+                              home_team_data.get('team_division') == away_team_data.get('team_division'))
             
-        Returns:
-            Current standings organized by division or conference
-        """
-        if not self.current_season:
-            return {
-                'success': False,
-                'error': 'No active season'
-            }
-        
-        try:
-            standings = self.current_season.get_standings(by_division=by_division)
+            is_conference = bool(home_team_data and away_team_data and
+                                home_team_data.get('team_conference') == away_team_data.get('team_conference'))
             
-            return {
-                'success': True,
-                'standings': standings,
-                'organization': 'division' if by_division else 'conference',
-                'last_updated': self.current_season.current_week
-            }
-            
-        except Exception as e:
-            return {
-                'success': False,
-                'error': f'Failed to get standings: {str(e)}'
-            }
-    
-    def get_team_schedule(self, team_abbreviation: str) -> Dict[str, Any]:
-        """
-        Get complete schedule for a specific team.
-        
-        Args:
-            team_abbreviation: Team's abbreviation (e.g., 'KC', 'BUF')
-            
-        Returns:
-            Complete schedule for the team
-        """
-        if not self.current_season:
-            return {
-                'success': False,
-                'error': 'No active season'
-            }
-        
-        try:
-            # Validate team exists
-            team_abbreviations = [team.abbreviation for team in self.teams]
-            if team_abbreviation not in team_abbreviations:
-                return {
-                    'success': False,
-                    'error': f'Team {team_abbreviation} not found'
-                }
-            
-            schedule = self.current_season.get_team_schedule(team_abbreviation)
-            
-            # Get team record
-            team_record = self.current_season.records.get(team_abbreviation)
-            
-            return {
-                'success': True,
-                'team': team_abbreviation,
-                'schedule': schedule,
-                'record': team_record.to_dict() if team_record else None,
-                'total_games': len(schedule)
-            }
-            
-        except Exception as e:
-            return {
-                'success': False,
-                'error': f'Failed to get team schedule: {str(e)}'
-            }
-    
-    def get_playoff_picture(self) -> Dict[str, Any]:
-        """
-        Get current playoff standings and scenarios.
-        
-        Returns:
-            Playoff picture for both conferences
-        """
-        if not self.current_season:
-            return {
-                'success': False,
-                'error': 'No active season'
-            }
-        
-        try:
-            playoff_picture = self.current_season.get_playoff_picture()
-            
-            if not playoff_picture:
-                return {
-                    'success': True,
-                    'message': 'Playoffs not applicable in current season phase',
-                    'current_phase': self.current_season.current_phase.value
-                }
-            
-            return {
-                'success': True,
-                'playoff_picture': playoff_picture,
-                'current_week': self.current_season.current_week
-            }
-            
-        except Exception as e:
-            return {
-                'success': False,
-                'error': f'Failed to get playoff picture: {str(e)}'
-            }
-    
-    def get_all_teams(self) -> Dict[str, Any]:
-        """
-        Get all available teams.
-        
-        Returns:
-            List of all teams with basic information
-        """
-        try:
-            teams_data = []
-            for team in self.teams:
-                teams_data.append({
-                    'name': team.name,
-                    'city': team.city,
-                    'abbreviation': team.abbreviation,
-                    'conference': team.conference,
-                    'division': team.division
-                })
-            
-            # Organize by conference and division
-            organized_teams = {}
-            for team_data in teams_data:
-                conf = team_data['conference']
-                div = team_data['division']
-                
-                if conf not in organized_teams:
-                    organized_teams[conf] = {}
-                if div not in organized_teams[conf]:
-                    organized_teams[conf][div] = []
-                
-                organized_teams[conf][div].append(team_data)
-            
-            return {
-                'success': True,
-                'teams': teams_data,
-                'organized_teams': organized_teams,
-                'total_teams': len(teams_data)
-            }
-            
-        except Exception as e:
-            return {
-                'success': False,
-                'error': f'Failed to get teams: {str(e)}'
-            }
-    
-    def simulate_through_week(self, target_week: int) -> Dict[str, Any]:
-        """
-        Get all games that need to be simulated through a target week.
-        
-        Args:
-            target_week: Week to simulate through (1-18)
-            
-        Returns:
-            List of games to simulate in order
-        """
-        if not self.current_season:
-            return {
-                'success': False,
-                'error': 'No active season'
-            }
-        
-        try:
-            if target_week < 1 or target_week > 18:
-                return {
-                    'success': False,
-                    'error': 'Week must be between 1 and 18'
-                }
-            
-            if target_week < self.current_season.current_week:
-                return {
-                    'success': False,
-                    'error': f'Target week {target_week} is in the past (current week: {self.current_season.current_week})'
-                }
-            
-            # Get all games from current week through target week
-            games_to_simulate = []
-            for week in range(self.current_season.current_week, target_week + 1):
-                week_games = self.current_season.get_week_games(week)
-                for game in week_games:
-                    if game.status == GameStatus.SCHEDULED:
-                        games_to_simulate.append(game.to_dict())
-            
-            return {
-                'success': True,
-                'games_to_simulate': games_to_simulate,
-                'count': len(games_to_simulate),
-                'weeks_covered': list(range(self.current_season.current_week, target_week + 1))
-            }
-            
-        except Exception as e:
-            return {
-                'success': False,
-                'error': f'Failed to get simulation plan: {str(e)}'
-            }
-    
-    def get_playoff_bracket(self) -> Dict[str, Any]:
-        """
-        Get the current playoff bracket.
-        
-        Returns:
-            Complete playoff bracket with all rounds and matchups
-        """
-        if not self.current_season:
-            return {
-                'success': False,
-                'error': 'No active season'
-            }
-        
-        try:
-            bracket = self.current_season.get_playoff_bracket()
-            
-            if not bracket:
-                return {
-                    'success': True,
-                    'message': 'Playoffs not yet available',
-                    'current_phase': self.current_season.current_phase.value,
-                    'playoff_picture': self.current_season.get_playoff_picture()
-                }
-            
-            return {
-                'success': True,
-                'bracket': bracket,
-                'current_phase': self.current_season.current_phase.value
-            }
-            
-        except Exception as e:
-            return {
-                'success': False,
-                'error': f'Failed to get playoff bracket: {str(e)}'
-            }
-    
-    def get_next_playoff_games(self) -> Dict[str, Any]:
-        """
-        Get the next playoff games that can be played.
-        
-        Returns:
-            List of playoff games ready for simulation
-        """
-        if not self.current_season:
-            return {
-                'success': False,
-                'error': 'No active season'
-            }
-        
-        try:
-            games = self.current_season.get_next_playoff_games()
-            
-            return {
-                'success': True,
-                'games': games,
-                'count': len(games),
-                'current_phase': self.current_season.current_phase.value
-            }
-            
-        except Exception as e:
-            return {
-                'success': False,
-                'error': f'Failed to get next playoff games: {str(e)}'
-            }
-    
-    def simulate_playoff_game(self, game_id: str, home_score: int, away_score: int,
-                             overtime: bool = False) -> Dict[str, Any]:
-        """
-        Submit the result of a completed playoff game.
-        
-        Args:
-            game_id: Playoff game identifier
-            home_score: Home team's final score
-            away_score: Away team's final score
-            overtime: Whether game went to overtime
-            
-        Returns:
-            Confirmation of result processing and updated bracket status
-        """
-        if not self.current_season:
-            return {
-                'success': False,
-                'error': 'No active season'
-            }
-        
-        try:
-            # Validate scores
-            if home_score < 0 or away_score < 0:
-                return {
-                    'success': False,
-                    'error': 'Scores cannot be negative'
-                }
-            
-            if home_score == away_score:
-                return {
-                    'success': False,
-                    'error': 'Playoff games cannot end in ties'
-                }
-            
-            # Process the playoff game result
-            success = self.current_season.process_playoff_game_result(
-                game_id=game_id,
-                home_score=home_score,
-                away_score=away_score,
-                overtime=overtime
+            # Update home team record
+            season_team_dao.add_game_result(
+                season_id, game['home_team_id'], home_won, 
+                home_score, away_score, is_division, is_conference
             )
             
-            if not success:
-                return {
-                    'success': False,
-                    'error': f'Playoff game {game_id} not found or could not be processed'
-                }
-            
-            # Get updated bracket status
-            bracket_status = self.current_season.get_playoff_bracket()
+            # Update away team record
+            season_team_dao.add_game_result(
+                season_id, game['away_team_id'], away_won, 
+                away_score, home_score, is_division, is_conference
+            )
             
             return {
                 'success': True,
-                'message': f'Playoff game {game_id} result processed successfully',
+                'message': f'Game result processed successfully',
                 'game_result': {
                     'game_id': game_id,
                     'home_score': home_score,
                     'away_score': away_score,
                     'overtime': overtime
-                },
-                'bracket_status': bracket_status
+                }
             }
             
         except Exception as e:
+            current_app.logger.error(f"Error submitting game result: {str(e)}")
             return {
                 'success': False,
-                'error': f'Failed to process playoff game result: {str(e)}'
+                'error': f'Failed to process game result: {str(e)}'
             }
+    
+    def get_standings(self, season_id: str, user_id: str, by_division: bool = True) -> Dict[str, Any]:
+        """
+        Get current league standings.
+
+        Parameters:
+            season_id (str): Season ID.
+            user_id (str): User ID (for authorization).
+            by_division (bool, optional): Whether to organize by division (True) or conference (False).
+
+        Returns:
+            Dict[str, Any]: Current standings organized by division or conference.
+        """
+        try:
+            db_manager = get_db_manager()
+            if not db_manager:
+                return {"success": False, "error": "Database connection not available"}
+            
+            # Verify user access
+            if not self._verify_season_access(season_id, user_id):
+                return {"success": False, "error": "Season not found or access denied"}
+            
+            season_team_dao = SeasonTeamDAO(db_manager)
+            
+            if by_division:
+                # Get standings organized by division
+                standings = {}
+                for conference in ['AFC', 'NFC']:
+                    standings[conference] = {}
+                    for division in ['East', 'West', 'North', 'South']:
+                        division_standings = season_team_dao.get_standings(
+                            season_id, conference=conference, division=division
+                        )
+                        if division_standings:
+                            standings[conference][division] = division_standings
+            else:
+                # Get standings by conference
+                standings = {}
+                for conference in ['AFC', 'NFC']:
+                    conference_standings = season_team_dao.get_standings(
+                        season_id, conference=conference
+                    )
+                    standings[conference] = conference_standings
+            
+            return {
+                'success': True,
+                'standings': standings,
+                'organization': 'division' if by_division else 'conference'
+            }
+            
+        except Exception as e:
+            current_app.logger.error(f"Error getting standings: {str(e)}")
+            return {
+                'success': False,
+                'error': f'Failed to get standings: {str(e)}'
+            }
+    
+    def get_team_schedule(self, season_id: str, user_id: str, team_id: str) -> Dict[str, Any]:
+        """
+        Get the complete schedule for a specific team.
+
+        Parameters:
+            season_id (str): Season ID.
+            user_id (str): User ID (for authorization).
+            team_id (str): Team ID.
+
+        Returns:
+            Dict[str, Any]: Complete schedule for the team.
+        """
+        try:
+            db_manager = get_db_manager()
+            if not db_manager:
+                return {"success": False, "error": "Database connection not available"}
+            
+            # Verify user access
+            if not self._verify_season_access(season_id, user_id):
+                return {"success": False, "error": "Season not found or access denied"}
+            
+            season_game_dao = SeasonGameDAO(db_manager)
+            season_team_dao = SeasonTeamDAO(db_manager)
+            
+            # Get team's games
+            team_games = season_game_dao.get_team_games(season_id, team_id)
+            
+            # Get team's season record
+            team_season = season_team_dao.get_team_in_season(season_id, team_id)
+            
+            formatted_games = []
+            for game in team_games:
+                formatted_games.append(format_game(game))
+            
+            return {
+                'success': True,
+                'team_id': team_id,
+                'schedule': formatted_games,
+                'record': format_team_record(team_season) if team_season else None,
+                'total_games': len(formatted_games)
+            }
+            
+        except Exception as e:
+            current_app.logger.error(f"Error getting team schedule: {str(e)}")
+            return {
+                'success': False,
+                'error': f'Failed to get team schedule: {str(e)}'
+            }
+    
+    def _verify_season_access(self, season_id: str, user_id: str) -> bool:
+        """Verify that user has access to the season."""
+        try:
+            db_manager = get_db_manager()
+            if not db_manager:
+                return False
+            
+            season_dao = SeasonDAO(db_manager)
+            season = season_dao.get_by_id(season_id)
+            
+            return season is not None and str(season['user_id']) == str(user_id)
+        except:
+            return False

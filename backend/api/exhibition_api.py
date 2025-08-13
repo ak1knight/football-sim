@@ -7,38 +7,33 @@ with customizable conditions like weather.
 
 from typing import Dict, Any, Optional, List
 from flask import Blueprint, request, jsonify
-import sys
-import os
+from typing import Dict, Any, Optional, List
+import logging
 
-# Add the backend directory to the Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from data.team_loader import load_sample_teams
+from database.connection import get_db_manager
+from database.dao import TeamDAO
 from simulation.game_engine import GameEngine
 from models.weather import Weather, WeatherCondition, WindDirection
+from models.team import Team as TeamModel, TeamStats # Import the Team model and TeamStats for GameEngine
 
 exhibition_bp = Blueprint('exhibition', __name__)
+logger = logging.getLogger(__name__)
 
 
 @exhibition_bp.route('/teams', methods=['GET'])
 def get_teams():
-    """Get all available teams for selection."""
+    """Get all available teams for selection from the database."""
     try:
-        teams = load_sample_teams()
+        db_manager = get_db_manager()
+        if not db_manager:
+            return jsonify({"success": False, "error": "Database connection not available"}), 500
+        
+        team_dao = TeamDAO(db_manager)
+        teams = team_dao.get_all()
         
         teams_data = []
         for team in teams:
-            teams_data.append({
-                'abbreviation': team.abbreviation,
-                'name': team.name,
-                'city': team.city,
-                'conference': team.conference,
-                'division': team.division,
-                'colors': {
-                    'primary': '#1f2937',  # Default colors, could be enhanced
-                    'secondary': '#6b7280'
-                }
-            })
+            teams_data.append(_format_team_data(team))
         
         # Sort teams alphabetically by city + name
         teams_data.sort(key=lambda x: f"{x['city']} {x['name']}")
@@ -50,21 +45,22 @@ def get_teams():
         })
     
     except Exception as e:
+        logger.error(f"Error getting teams: {str(e)}")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': f'Failed to retrieve teams: {str(e)}'
         }), 500
 
 
 @exhibition_bp.route('/simulate', methods=['POST'])
 def simulate_exhibition_game():
     """
-    Simulate an exhibition game between two teams.
+    Simulate an exhibition game between two teams using database-backed team data.
     
     Expected JSON payload:
     {
-        "home_team": "KC",
-        "away_team": "BUF",
+        "home_team_id": "uuid-of-home-team",
+        "away_team_id": "uuid-of-away-team",
         "weather": {
             "condition": "clear",
             "temperature": 72,
@@ -87,7 +83,7 @@ def simulate_exhibition_game():
             }), 400
         
         # Validate required fields
-        required_fields = ['home_team', 'away_team']
+        required_fields = ['home_team_id', 'away_team_id']
         for field in required_fields:
             if field not in data:
                 return jsonify({
@@ -95,28 +91,48 @@ def simulate_exhibition_game():
                     'error': f'Missing required field: {field}'
                 }), 400
         
-        home_team_abbr = data['home_team']
-        away_team_abbr = data['away_team']
+        home_team_id = data['home_team_id']
+        away_team_id = data['away_team_id']
         
-        # Load teams
-        teams = load_sample_teams()
-        teams_dict = {team.abbreviation: team for team in teams}
+        db_manager = get_db_manager()
+        if not db_manager:
+            return jsonify({"success": False, "error": "Database connection not available"}), 500
         
-        # Find the specified teams
-        if home_team_abbr not in teams_dict:
+        team_dao = TeamDAO(db_manager)
+        
+        # Retrieve teams from the database
+        home_team_data = team_dao.get_by_id(home_team_id)
+        away_team_data = team_dao.get_by_id(away_team_id)
+        
+        if not home_team_data:
             return jsonify({
                 'success': False,
-                'error': f'Home team "{home_team_abbr}" not found'
+                'error': f'Home team with ID "{home_team_id}" not found'
             }), 400
         
-        if away_team_abbr not in teams_dict:
+        if not away_team_data:
             return jsonify({
                 'success': False,
-                'error': f'Away team "{away_team_abbr}" not found'
+                'error': f'Away team with ID "{away_team_id}" not found'
             }), 400
         
-        home_team = teams_dict[home_team_abbr]
-        away_team = teams_dict[away_team_abbr]
+        # Convert dictionary data to TeamModel instances for GameEngine
+        home_team = TeamModel(
+            name=home_team_data['name'],
+            city=home_team_data['city'],
+            abbreviation=home_team_data['abbreviation'],
+            conference=home_team_data['conference'],
+            division=home_team_data['division'],
+            stats=TeamStats(**home_team_data['team_stats']) # Pass as TeamStats object
+        )
+        away_team = TeamModel(
+            name=away_team_data['name'],
+            city=away_team_data['city'],
+            abbreviation=away_team_data['abbreviation'],
+            conference=away_team_data['conference'],
+            division=away_team_data['division'],
+            stats=TeamStats(**away_team_data['team_stats']) # Pass as TeamStats object
+        )
         
         # Parse weather conditions
         weather_data = data.get('weather', {})
@@ -128,7 +144,7 @@ def simulate_exhibition_game():
         
         # Create and run the game simulation
         game_engine = GameEngine(
-            weather=weather, 
+            weather=weather,
             enable_reporting=detailed_stats_requested,
             verbose=False
         )
@@ -140,18 +156,8 @@ def simulate_exhibition_game():
         response_data = {
             'success': True,
             'game_result': {
-                'home_team': {
-                    'abbreviation': home_team.abbreviation,
-                    'name': home_team.name,
-                    'city': home_team.city,
-                    'score': result.home_score
-                },
-                'away_team': {
-                    'abbreviation': away_team.abbreviation,
-                    'name': away_team.name,
-                    'city': away_team.city,
-                    'score': result.away_score
-                },
+                'home_team': _format_team_data(home_team_data),
+                'away_team': _format_team_data(away_team_data),
                 'final_score': f"{result.away_score} - {result.home_score}",
                 'winner': _determine_winner(result, home_team, away_team),
                 'overtime': False,  # GameResult doesn't track this currently
@@ -174,10 +180,27 @@ def simulate_exhibition_game():
         return jsonify(response_data)
     
     except Exception as e:
+        logger.error(f"Error simulating exhibition game: {str(e)}")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': f'Failed to simulate game: {str(e)}'
         }), 500
+
+
+def _format_team_data(team: Dict[str, Any]) -> Dict[str, Any]:
+    """Format team data for API response."""
+    return {
+        'id': team['id'],
+        'abbreviation': team['abbreviation'],
+        'name': team['name'],
+        'city': team['city'],
+        'conference': team['conference'],
+        'division': team['division'],
+        'colors': { # Default colors, could be enhanced from DB if added
+            'primary': '#1f2937',
+            'secondary': '#6b7280'
+        }
+    }
 
 
 def _create_weather_condition(weather_data: Dict[str, Any]) -> Optional[Weather]:
@@ -222,7 +245,7 @@ def _create_weather_condition(weather_data: Dict[str, Any]) -> Optional[Weather]
         return Weather()
 
 
-def _determine_winner(result, home_team, away_team) -> Dict[str, Any]:
+def _determine_winner(result, home_team: TeamModel, away_team: TeamModel) -> Dict[str, Any]:
     """Determine the winning team."""
     if result.home_score > result.away_score:
         return {

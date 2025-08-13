@@ -6,11 +6,25 @@ including NFL teams, players, and reference data.
 """
 
 import logging
+import sys
+import os
 from typing import List, Dict, Any
+
+# Add the backend directory to the Python path for proper imports
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
 from .connection import DatabaseManager
 from .dao.team_dao import TeamDAO
 from .dao.player_dao import PlayerDAO
-from ..data.team_loader import load_sample_teams
+
+# Import team_loader with proper path handling
+try:
+    from data.team_loader import load_sample_teams
+except ImportError:
+    # Fallback for when running as a script
+    from ..data.team_loader import load_sample_teams
 
 logger = logging.getLogger(__name__)
 

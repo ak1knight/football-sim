@@ -12,15 +12,22 @@ import argparse
 import logging
 from typing import Any
 
-# Add the backend directory to Python path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add the backend directory to Python path for proper imports
+backend_dir = os.path.dirname(os.path.abspath(__file__))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
 
 from database.connection import initialize_database_manager, close_database_manager
 from database.migrations import (
-    create_database_schema, 
-    verify_database_schema, 
+    create_database_schema,
+    verify_database_schema,
     drop_database_schema,
     MigrationManager
+)
+from database.seed_data import (
+    seed_database,
+    verify_database_data,
+    DatabaseSeeder
 )
 
 # Configure logging
@@ -196,6 +203,93 @@ def test_connection(args: Any):
         close_database_manager()
 
 
+def seed_database_cmd(args: Any):
+    """Seed the database with NFL teams and players."""
+    try:
+        logger.info("Seeding database with NFL teams and players...")
+        
+        db_manager = initialize_database_manager()
+        
+        if not db_manager.test_connection():
+            logger.error("Database connection failed")
+            return False
+        
+        # Run seeding
+        result = seed_database(db_manager, force=args.force)
+        
+        if result['success']:
+            print(f"✅ Database seeding successful!")
+            print(f"Action: {result['action']}")
+            print(f"Teams: {result['teams_count']}")
+            print(f"Players: {result.get('players_count', 'N/A')}")
+            
+            # Verify the seeded data
+            if args.verify:
+                print("\nVerifying seeded data...")
+                verification = verify_database_data(db_manager)
+                if verification['success']:
+                    print("✅ Seed data verification passed!")
+                    print(f"Teams: {verification['teams']['total']} (AFC: {verification['teams']['afc']}, NFC: {verification['teams']['nfc']})")
+                    print(f"Players: {verification['players']['total']} across {verification['players']['teams_with_players']} teams")
+                else:
+                    print("❌ Seed data verification failed!")
+                    for error in verification.get('errors', []):
+                        print(f"  - {error}")
+            
+            return True
+        else:
+            print(f"❌ Database seeding failed: {result.get('message', 'Unknown error')}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Database seeding failed: {str(e)}")
+        print(f"❌ Database seeding failed: {str(e)}")
+        return False
+    finally:
+        close_database_manager()
+
+
+def verify_seed_data_cmd(args: Any):
+    """Verify the database seed data."""
+    try:
+        logger.info("Verifying database seed data...")
+        
+        db_manager = initialize_database_manager()
+        
+        if not db_manager.test_connection():
+            logger.error("Database connection failed")
+            return False
+        
+        verification = verify_database_data(db_manager)
+        
+        print("\n=== Seed Data Verification Report ===")
+        print(f"Overall status: {'✅ PASSED' if verification['success'] else '❌ FAILED'}")
+        
+        if 'teams' in verification:
+            print(f"\nTeams:")
+            print(f"  Total: {verification['teams'].get('total', 0)}")
+            print(f"  AFC: {verification['teams'].get('afc', 0)}")
+            print(f"  NFC: {verification['teams'].get('nfc', 0)}")
+        
+        if 'players' in verification:
+            print(f"\nPlayers:")
+            print(f"  Total: {verification['players'].get('total', 0)}")
+            print(f"  Teams with players: {verification['players'].get('teams_with_players', 0)}")
+        
+        if verification.get('errors'):
+            print(f"\nErrors:")
+            for error in verification['errors']:
+                print(f"  - {error}")
+        
+        return verification['success']
+        
+    except Exception as e:
+        logger.error(f"Seed data verification failed: {str(e)}")
+        return False
+    finally:
+        close_database_manager()
+
+
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(description="Football Simulation Database Management")
@@ -225,6 +319,18 @@ def main():
     # Test command
     test_parser = subparsers.add_parser('test', help='Test database connection')
     test_parser.set_defaults(func=test_connection)
+    
+    # Seed command
+    seed_parser = subparsers.add_parser('seed', help='Seed database with NFL teams and players')
+    seed_parser.add_argument('--force', action='store_true',
+                           help='Force re-seeding if data already exists')
+    seed_parser.add_argument('--verify', action='store_true',
+                           help='Verify seeded data after seeding')
+    seed_parser.set_defaults(func=seed_database_cmd)
+    
+    # Verify seed data command
+    verify_seed_parser = subparsers.add_parser('verify-seed', help='Verify database seed data')
+    verify_seed_parser.set_defaults(func=verify_seed_data_cmd)
     
     args = parser.parse_args()
     

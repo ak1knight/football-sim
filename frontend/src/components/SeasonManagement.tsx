@@ -1,14 +1,18 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { observer } from 'mobx-react-lite';
-import { seasonStore, appStore } from '../stores';
+import { Input } from './ui/Input';
+import { useContext } from 'react';
+import { StoresContext } from '../stores';
 import { PageHeader, ErrorMessage, Button, Card, CardHeader, LoadingMessage, GameCard } from './ui';
 
 // Sub-components for each tab
 const SeasonSetup: React.FC = observer(() => {
+  const { appStore, seasonStore } = useContext(StoresContext);
+  const [seasonName, setSeasonName] = useState(`NFL 2024 Season`);
   const { currentSeason, loading, error, teams, organizedTeams, isSeasonComplete } = seasonStore;
 
   const handleCreateSeason = async () => {
-    const result = await seasonStore.createSeason(2024);
+    const result = await seasonStore.createSeason(2024, undefined, seasonName);
     if (result.success) {
       appStore.setCurrentTab('Schedule');
     }
@@ -40,7 +44,9 @@ const SeasonSetup: React.FC = observer(() => {
                   </div>
                   <div>
                     <span className="text-secondary-400">Phase:</span>
-                    <span className="text-white ml-2 capitalize">{currentSeason.current_phase.replace('_', ' ')}</span>
+                    <span className="text-white ml-2 capitalize">
+                      {currentSeason.current_phase ? currentSeason.current_phase.replace('_', ' ') : ''}
+                    </span>
                   </div>
                   <div>
                     <span className="text-secondary-400">Games:</span>
@@ -88,6 +94,16 @@ const SeasonSetup: React.FC = observer(() => {
           <p className="text-secondary-400 mb-6">
             Start a new NFL season with automated scheduling and comprehensive simulation.
           </p>
+          <div className="mb-4">
+            <Input
+              type="text"
+              value={seasonName}
+              onChange={e => setSeasonName(e.target.value)}
+              placeholder="Season Name"
+              disabled={loading}
+              label="Season Name"
+            />
+          </div>
           <Button
             onClick={handleCreateSeason}
             loading={loading}
@@ -129,6 +145,7 @@ const SeasonSetup: React.FC = observer(() => {
 });
 
 const SeasonSchedule: React.FC = observer(() => {
+  const { seasonStore } = useContext(StoresContext);
   const {
     currentSeason, nextGames, currentWeekGames, selectedWeek,
     loading, error, scheduledGamesCount
@@ -335,6 +352,7 @@ const SeasonSchedule: React.FC = observer(() => {
 });
 
 const SeasonStandings: React.FC = observer(() => {
+  const { seasonStore } = useContext(StoresContext);
   const { standings, standingsByDivision, loading, error } = seasonStore;
 
   useEffect(() => {
@@ -438,6 +456,7 @@ const SeasonStandings: React.FC = observer(() => {
 });
 
 const SeasonPlayoffs: React.FC = observer(() => {
+  const { appStore, seasonStore } = useContext(StoresContext);
   const {
     currentSeason, playoffBracket, nextPlayoffGames, playoffSimulationResults,
     loading, error, isInPlayoffs
@@ -534,7 +553,9 @@ const SeasonPlayoffs: React.FC = observer(() => {
           </div>
           <div className="mt-8">
             <p className="text-sm text-secondary-400">
-              Current Phase: <span className="capitalize text-white">{currentSeason.current_phase.replace('_', ' ')}</span>
+              Current Phase: <span className="capitalize text-white">
+                {currentSeason.current_phase ? currentSeason.current_phase.replace('_', ' ') : ''}
+              </span>
             </p>
           </div>
         </div>
@@ -792,21 +813,35 @@ const SeasonPlayoffs: React.FC = observer(() => {
 
 // Main component
 export const SeasonManagement: React.FC = observer(() => {
+  const { appStore, seasonStore } = useContext(StoresContext);
   const { currentSection } = appStore;
   const activeTab = appStore.currentTab || 'Setup';
 
-  // Load initial data when component mounts or section changes
+  // Load all seasons and select the most recent on mount/section change
   useEffect(() => {
     if (currentSection === 'season') {
       const loadInitialData = async () => {
-        await Promise.all([
-          seasonStore.loadSeasonStatus(),
-          seasonStore.loadTeams()
-        ]);
+        await seasonStore.fetchAllSeasons();
+        if (seasonStore.selectedSeasonId) {
+          await seasonStore.loadSeasonStatus(seasonStore.selectedSeasonId);
+        }
+        await seasonStore.loadTeams();
       };
       loadInitialData();
     }
-  }, [currentSection]);
+  }, [currentSection, seasonStore]);
+
+  // Update current season when selectedSeasonId changes
+  useEffect(() => {
+    if (seasonStore.selectedSeasonId) {
+      seasonStore.loadSeasonStatus(seasonStore.selectedSeasonId);
+      seasonStore.loadNextGames();
+      if (seasonStore.currentSeason) {
+        seasonStore.loadWeekGames(seasonStore.currentSeason.current_week);
+        seasonStore.loadStandings(true);
+      }
+    }
+  }, [seasonStore.selectedSeasonId]);
 
   // Force component re-render when switching to season section
   useEffect(() => {
@@ -814,7 +849,15 @@ export const SeasonManagement: React.FC = observer(() => {
       // Clear any errors and reset state when entering season section
       seasonStore.setError(null);
     }
-  }, [currentSection]);
+  }, [currentSection, seasonStore]);
+
+  // Ensure games are loaded when switching to the Schedule tab
+  useEffect(() => {
+    if (activeTab === 'Schedule' && seasonStore.currentSeason) {
+      seasonStore.loadNextGames();
+      seasonStore.loadWeekGames(seasonStore.currentSeason.current_week);
+    }
+  }, [activeTab, seasonStore]);
 
   const tabs = appStore.sectionTabs;
 
@@ -833,12 +876,41 @@ export const SeasonManagement: React.FC = observer(() => {
     }
   };
 
+  // Season selector UI
+  const handleSeasonChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    seasonStore.setSelectedSeason(e.target.value);
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Season Simulation"
         description="Manage and simulate complete NFL seasons with comprehensive statistics"
       />
+
+      {/* Season Selector */}
+      <div className="flex items-center gap-4">
+        <label htmlFor="season-select" className="text-secondary-300 font-medium">
+          Select Season:
+        </label>
+        <select
+          id="season-select"
+          value={seasonStore.selectedSeasonId || ''}
+          onChange={handleSeasonChange}
+          className="bg-secondary-800 text-white rounded px-3 py-2"
+          disabled={seasonStore.allSeasons.length === 0}
+        >
+          {seasonStore.allSeasons.length === 0 ? (
+            <option value="">No seasons available</option>
+          ) : (
+            seasonStore.allSeasons.map(season => (
+              <option key={season.id} value={season.id}>
+                {season.season_year} ({season.schedule_type})
+              </option>
+            ))
+          )}
+        </select>
+      </div>
 
       {/* Tab Navigation */}
       <div className="flex space-x-1 bg-secondary-800 p-1 rounded-lg">
@@ -858,7 +930,17 @@ export const SeasonManagement: React.FC = observer(() => {
       </div>
 
       {/* Tab Content */}
-      {renderContent()}
+      {seasonStore.allSeasons.length === 0 ? (
+        <div className="card p-8 text-center">
+          <div className="text-6xl mb-4">🏈</div>
+          <h2 className="text-xl font-semibold text-white mb-2">No Seasons Found</h2>
+          <p className="text-secondary-400 mb-6">
+            Create a new season to get started.
+          </p>
+        </div>
+      ) : (
+        renderContent()
+      )}
     </div>
   );
 });
