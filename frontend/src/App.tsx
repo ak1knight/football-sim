@@ -7,11 +7,11 @@ import { AuthForm } from './components/AuthForm';
 import {
   Layout,
   ExhibitionGame,
-  SeasonManagement,
   TeamManagement,
   LeagueManagement,
   UserSettings
 } from './components';
+import SeasonManagement from './components/season-management';
 
 const AppRoutes: React.FC = observer(() => {
   const { appStore } = useContext(StoresContext);

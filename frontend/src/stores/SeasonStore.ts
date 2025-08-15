@@ -313,13 +313,12 @@ export class SeasonStore {
 
   async loadNextGames(limit: number = 16) {
     try {
-      // Use GET with query params as required by backend
       const seasonId = this.selectedSeasonId || this.currentSeason?.id;
       if (!seasonId) {
         return { success: false, error: 'No current season ID' };
       }
       const params = new URLSearchParams({ season_id: seasonId, user_id: DEFAULT_USER_ID, limit: limit.toString() });
-      const response = await fetch(`/api/season/next-games?${params.toString()}`, {
+      const response = await apiFetch(`/api/season/next-games?${params.toString()}`, {
         method: 'GET',
       });
       const result = await response.json();
@@ -340,9 +339,12 @@ export class SeasonStore {
   async loadWeekGames(week: number) {
     try {
       const seasonId = this.selectedSeasonId || this.currentSeason?.id;
-      const response = await apiFetch(`/api/season/week`, {
-        method: 'POST',
-        body: JSON.stringify({ week, season_id: seasonId })
+      if (!seasonId) {
+        return { success: false, error: 'No current season ID' };
+      }
+      const params = new URLSearchParams({ season_id: seasonId, user_id: DEFAULT_USER_ID });
+      const response = await apiFetch(`/api/season/week/${week}?${params.toString()}`, {
+        method: 'GET',
       });
       const result = await response.json();
       
@@ -363,9 +365,12 @@ export class SeasonStore {
   async loadStandings(byDivision: boolean = true) {
     try {
       const seasonId = this.selectedSeasonId || this.currentSeason?.id;
-      const response = await apiFetch(`/api/season/standings`, {
-        method: 'POST',
-        body: JSON.stringify({ by_division: byDivision, season_id: seasonId })
+      if (!seasonId) {
+        return { success: false, error: 'No current season ID' };
+      }
+      const params = new URLSearchParams({ season_id: seasonId, user_id: DEFAULT_USER_ID, by_division: String(byDivision) });
+      const response = await apiFetch(`/api/season/standings?${params.toString()}`, {
+        method: 'GET',
       });
       const result = await response.json();
       

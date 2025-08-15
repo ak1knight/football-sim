@@ -247,11 +247,11 @@ class SeasonTeamDAO(BaseDAO):
                 team['point_differential'] = team['points_for'] - team['points_against']
                 
                 # Division record percentage
-                div_games = team['division_wins'] + team['division_losses']
+                div_games = team['division_wins']
                 team['division_win_percentage'] = team['division_wins'] / div_games if div_games > 0 else 0
                 
                 # Conference record percentage
-                conf_games = team['conference_wins'] + team['conference_losses']
+                conf_games = team['conference_wins']
                 team['conference_win_percentage'] = team['conference_wins'] / conf_games if conf_games > 0 else 0
             
             # Sort by wins (desc), then win percentage (desc), then point differential (desc)
