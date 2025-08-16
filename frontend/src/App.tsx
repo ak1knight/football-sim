@@ -9,9 +9,10 @@ import {
   ExhibitionGame,
   TeamManagement,
   LeagueManagement,
-  UserSettings
+  UserSettings,
+  SeasonManagement
 } from './components';
-import SeasonManagement from './components/season-management';
+
 
 const AppRoutes: React.FC = observer(() => {
   const { appStore } = useContext(StoresContext);
@@ -48,17 +49,21 @@ const AppRoutes: React.FC = observer(() => {
   );
 });
 
-const App: React.FC = observer(() => {
+const AppWithAuth: React.FC = observer(() => {
   const { userStore } = useContext(StoresContext);
   return (
-    <StoresProvider>
-      <Router>
-        <div className="App">
-          {userStore.isAuthenticated ? <AppRoutes /> : <AuthForm />}
-        </div>
-      </Router>
-    </StoresProvider>
+    <Router>
+      <div className="App">
+        {userStore.isAuthenticated ? <AppRoutes /> : <AuthForm />}
+      </div>
+    </Router>
   );
 });
+
+const App: React.FC = () => (
+  <StoresProvider>
+    <AppWithAuth />
+  </StoresProvider>
+);
 
 export default App;

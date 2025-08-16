@@ -28,7 +28,7 @@ def format_game(game: Dict[str, Any]) -> Dict[str, Any]:
     return {
         'id': game['id'],
         'week': game['week'],
-        'game_type': game['game_type'],
+        #'game_type': game['game_type'],
         'status': game['status'],
         'home_team': {
             'id': game['home_team_id'],

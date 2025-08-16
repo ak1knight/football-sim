@@ -89,6 +89,42 @@ class ScheduledGame:
             'winner': self.winner.abbreviation if self.winner else None
         }
 
+    @staticmethod
+    def from_dict(data: Dict, team_map: Dict[str, 'Team']) -> 'ScheduledGame':
+        """Deserialize from dict (e.g., DB row), using a team_map of abbreviation->Team."""
+        home_team = team_map[data['home_team_abbr']]
+        away_team = team_map[data['away_team_abbr']]
+        scheduled_date = (
+            datetime.fromisoformat(data['scheduled_date']) if data.get('scheduled_date') else None
+        )
+        return ScheduledGame(
+            game_id=data['game_id'],
+            home_team=home_team,
+            away_team=away_team,
+            week=int(data['week']),
+            status=GameStatus(data['status']) if 'status' in data else GameStatus.SCHEDULED,
+            scheduled_date=scheduled_date,
+            home_score=data.get('home_score'),
+            away_score=data.get('away_score'),
+            overtime=data.get('overtime', False),
+            game_duration=data.get('game_duration', 60)
+        )
+
+    def to_db_dict(self) -> Dict:
+        """Serialize for DB storage (flat, with team abbreviations)."""
+        return {
+            'game_id': self.game_id,
+            'home_team_abbr': self.home_team.abbreviation,
+            'away_team_abbr': self.away_team.abbreviation,
+            'week': self.week,
+            'status': self.status.value,
+            'scheduled_date': self.scheduled_date.isoformat() if self.scheduled_date else None,
+            'home_score': self.home_score,
+            'away_score': self.away_score,
+            'overtime': self.overtime,
+            'game_duration': self.game_duration
+        }
+
 
 @dataclass
 class TeamRecord:
@@ -144,6 +180,37 @@ class TeamRecord:
             'games_played': self.games_played
         }
 
+    @staticmethod
+    def from_dict(data: Dict, team: 'Team') -> 'TeamRecord':
+        """Deserialize from dict (e.g., DB row), using a Team object."""
+        return TeamRecord(
+            team=team,
+            wins=data.get('wins', 0),
+            losses=data.get('losses', 0),
+            ties=data.get('ties', 0),
+            points_for=data.get('points_for', 0),
+            points_against=data.get('points_against', 0),
+            division_wins=data.get('division_wins', 0),
+            division_losses=data.get('division_losses', 0),
+            conference_wins=data.get('conference_wins', 0),
+            conference_losses=data.get('conference_losses', 0)
+        )
+
+    def to_db_dict(self) -> Dict:
+        """Serialize for DB storage (flat, with team abbreviation)."""
+        return {
+            'team_abbr': self.team.abbreviation,
+            'wins': self.wins,
+            'losses': self.losses,
+            'ties': self.ties,
+            'points_for': self.points_for,
+            'points_against': self.points_against,
+            'division_wins': self.division_wins,
+            'division_losses': self.division_losses,
+            'conference_wins': self.conference_wins,
+            'conference_losses': self.conference_losses
+        }
+
 
 class SeasonEngine:
     """
@@ -154,7 +221,12 @@ class SeasonEngine:
     """
     
     def __init__(self, teams: List[Team], season_year: int = 2024, seed: Optional[int] = None,
-                 schedule_generator: Optional[ScheduleGenerator] = None):
+                 schedule_generator: Optional[ScheduleGenerator] = None,
+                 current_week: Optional[int] = None,
+                 current_phase: Optional[str] = None,
+                 schedule: Optional[List[ScheduledGame]] = None,
+                 records: Optional[Dict[str, TeamRecord]] = None,
+                 completed_games: Optional[List[ScheduledGame]] = None):
         """
         Initialize the season engine.
         
@@ -167,31 +239,72 @@ class SeasonEngine:
         self.teams = teams
         self.season_year = season_year
         self.seed = seed
-        
-        # Use provided schedule generator or default to NFL
         self.schedule_generator = schedule_generator or NFLScheduleGenerator()
-        
         if seed is not None:
             random.seed(seed)
-        
-        # Season state
-        self.current_week = 1
-        self.current_phase = SeasonPhase.REGULAR_SEASON
-        
-        # Games and records
-        self.schedule: List[ScheduledGame] = []
-        self.records: Dict[str, TeamRecord] = {}
-        self.completed_games: List[ScheduledGame] = []
-        
-        # Playoff engine (initialized when playoffs start)
+
+        # State from DB or defaults
+        self.current_week = current_week if current_week is not None else 1
+        self.current_phase = SeasonPhase(current_phase) if current_phase else SeasonPhase.REGULAR_SEASON
+        self.schedule: List[ScheduledGame] = schedule if schedule is not None else []
+        self.records: Dict[str, TeamRecord] = records if records is not None else {t.abbreviation: TeamRecord(t) for t in teams}
+        self.completed_games: List[ScheduledGame] = completed_games if completed_games is not None else []
         self.playoff_engine: Optional['PlayoffEngine'] = None
-        
-        # Initialize team records
-        for team in teams:
-            self.records[team.abbreviation] = TeamRecord(team)
-        
-        # Generate season schedule
-        self._generate_schedule()
+
+        # If no schedule provided, generate it
+        if not self.schedule:
+            self._generate_schedule()
+    @staticmethod
+    def from_db(
+        teams: List[Team],
+        season_year: int,
+        db_schedule: List[Dict],
+        db_records: List[Dict],
+        current_week: int,
+        current_phase: str,
+        completed_games: Optional[List[Dict]] = None,
+        schedule_generator: Optional[ScheduleGenerator] = None,
+        seed: Optional[int] = None
+    ) -> 'SeasonEngine':
+        """
+        Construct a SeasonEngine from DB data.
+        - teams: list of Team objects
+        - db_schedule: list of dicts (game rows)
+        - db_records: list of dicts (team record rows)
+        - completed_games: list of dicts (game rows)
+        """
+        team_map = {t.abbreviation: t for t in teams}
+        schedule = [ScheduledGame.from_dict(g, team_map) for g in db_schedule]
+        records = {r['team_abbr']: TeamRecord.from_dict(r, team_map[r['team_abbr']]) for r in db_records}
+        completed = [ScheduledGame.from_dict(g, team_map) for g in (completed_games or [])]
+        return SeasonEngine(
+            teams=teams,
+            season_year=season_year,
+            seed=seed,
+            schedule_generator=schedule_generator,
+            current_week=current_week,
+            current_phase=current_phase,
+            schedule=schedule,
+            records=records,
+            completed_games=completed
+        )
+
+    def to_db(self) -> Dict:
+        """
+        Serialize the engine state for DB storage.
+        Returns a dict with keys: schedule, records, completed_games, current_week, current_phase, season_year, seed
+        """
+        return {
+            'season_year': self.season_year,
+            'seed': self.seed,
+            'current_week': self.current_week,
+            'current_phase': self.current_phase.value,
+            'schedule': [g.to_db_dict() for g in self.schedule],
+            'records': [r.to_db_dict() for r in self.records.values()],
+            'completed_games': [g.to_db_dict() for g in self.completed_games]
+        }
+
+    
     
     def _generate_schedule(self) -> None:
         """Generate the complete regular season schedule using the pluggable schedule generator."""

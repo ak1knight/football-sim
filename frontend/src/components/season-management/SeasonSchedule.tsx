@@ -39,6 +39,7 @@ const SeasonSchedule: React.FC = observer(() => {
 		return week <= currentSeason.current_week;
 	};
 
+	console.log('Current Season:', currentSeason);
 	if (!currentSeason) {
 		return (
 			<div className="card p-8 text-center">

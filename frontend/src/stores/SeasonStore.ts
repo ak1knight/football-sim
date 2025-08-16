@@ -202,6 +202,7 @@ export class SeasonStore {
       const result = await response.json();
       if (result.success) {
         runInAction(() => {
+          console.log('Fetched seasons:', result.seasons);
           this.allSeasons = result.seasons || [];
           // If no selectedSeasonId, pick most recent
           if (!this.selectedSeasonId && this.allSeasons.length > 0) {
@@ -255,7 +256,7 @@ export class SeasonStore {
 
       if (result.success) {
         runInAction(() => {
-          this.currentSeason = result.season_status;
+          this.currentSeason = result.season;
         });
 
         // Load additional data after creating season
@@ -293,8 +294,9 @@ export class SeasonStore {
       const result = await response.json();
       
       if (result.success) {
+        console.log('Season status loaded:', result);
         runInAction(() => {
-          this.currentSeason = result.season_status;
+          this.currentSeason = result.season;
         });
       }
       
@@ -349,6 +351,7 @@ export class SeasonStore {
       const result = await response.json();
       
       if (result.success) {
+        console.log('Week games loaded successfully:', result.games);
         runInAction(() => {
           this.currentWeekGames = result.games;
           this.selectedWeek = week;
@@ -404,7 +407,7 @@ export class SeasonStore {
       
       if (result.success) {
         runInAction(() => {
-          this.currentSeason = result.season_status;
+          this.currentSeason = result.season;
           this.lastSimulationMessage = result.message;
           if (result.simulation_details) {
             this.simulationResults.unshift(result.simulation_details);
@@ -443,7 +446,7 @@ export class SeasonStore {
       
       if (result.success) {
         runInAction(() => {
-          this.currentSeason = result.season_status;
+          this.currentSeason = result.season;
           this.lastSimulationMessage = result.message;
           this.simulationResults.unshift(...result.simulated_games);
         });
@@ -488,7 +491,7 @@ export class SeasonStore {
       
       if (result.success) {
         runInAction(() => {
-          this.currentSeason = result.season_status;
+          this.currentSeason = result.season;
           this.lastSimulationMessage = result.message;
           this.simulationResults.unshift(...result.simulated_games);
         });
@@ -533,7 +536,7 @@ export class SeasonStore {
       
       if (result.success) {
         runInAction(() => {
-          this.currentSeason = result.season_status;
+          this.currentSeason = result.season;
           this.lastSimulationMessage = result.message;
           this.simulationResults.unshift(...result.simulated_games);
         });
