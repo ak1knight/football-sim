@@ -7,7 +7,6 @@ with customizable conditions like weather.
 
 from typing import Dict, Any, Optional, List
 from flask import Blueprint, request, jsonify
-from typing import Dict, Any, Optional, List
 import logging
 
 from database.connection import get_db_manager

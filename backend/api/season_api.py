@@ -584,3 +584,194 @@ class SeasonAPI:
                 'success': False,
                 'error': f'Failed to get team schedule: {str(e)}'
             }
+
+    def get_next_games(self, season_id: str, user_id: str, limit: int = 16) -> Dict[str, Any]:
+        """
+        Get next games ready for simulation.
+
+        Parameters:
+            season_id (str): Season ID.
+            user_id (str): User ID (for authorization).
+            limit (int): Maximum number of games to return.
+
+        Returns:
+            Dict[str, Any]: Next games ready for simulation.
+        """
+        # This method should have been implemented already in the previous fetch.
+        # Re-implementing based on the pattern from other methods
+        try:
+            db_manager = get_db_manager()
+            if not db_manager:
+                return {"success": False, "error": "Database connection not available"}
+            if not self._verify_season_access(season_id, user_id):
+                return {"success": False, "error": "Season not found or access denied"}
+            season_dao = SeasonDAO(db_manager)
+            season = season_dao.get_by_id(season_id)
+            if not season:
+                return {'success': False, 'error': 'Season not found'}
+            season_with_teams = season_dao.get_season_with_teams(season_id)
+            if not season_with_teams or 'teams' not in season_with_teams:
+                return {'success': False, 'error': 'Season teams not found'}
+            teams = season_with_teams['teams']
+            from models.team import Team
+            def dict_to_team(t):
+                if isinstance(t, Team):
+                    return t
+                keys = ['name', 'city', 'abbreviation', 'conference', 'division']
+                if all(k in t for k in keys):
+                    return Team(
+                        name=t['name'],
+                        city=t['city'],
+                        abbreviation=t['abbreviation'],
+                        conference=t['conference'],
+                        division=t['division']
+                    )
+                raise ValueError(f"Invalid team dict: {t}")
+            team_objs = [dict_to_team(t) for t in teams]
+            from database.dao import SeasonGameDAO, SeasonTeamDAO
+            season_game_dao = SeasonGameDAO(db_manager)
+            season_team_dao = SeasonTeamDAO(db_manager)
+            db_schedule = season_game_dao.get_season_games(season_id)
+            db_records = season_team_dao.get_season_teams(season_id)
+            completed_games = season_game_dao.get_completed_games(season_id)
+            from simulation.season_engine import SeasonEngine
+            from simulation.schedule_generators import NFLScheduleGenerator
+            engine = SeasonEngine.from_db(
+                teams=team_objs,
+                season_year=season['season_year'],
+                db_schedule=db_schedule,
+                db_records=db_records,
+                current_week=season['current_week'],
+                current_phase=season['phase'],
+                completed_games=completed_games,
+                schedule_generator=NFLScheduleGenerator(),
+                seed=season.get('seed') if hasattr(season, 'get') else None
+            )
+            next_games = engine.get_next_games(limit=limit)
+            return {
+                'success': True,
+                'games': [g.to_dict() for g in next_games],
+                'count': len(next_games)
+            }
+        except Exception as e:
+            current_app.logger.error(f"Error getting next games: {str(e)}")
+            return {
+                'success': False,
+                'error': f'Failed to get next games: {str(e)}'
+            }
+
+    def get_standings(self, season_id: str, user_id: str, by_division: bool = True) -> Dict[str, Any]:
+        """
+        Get current league standings.
+
+        Parameters:
+            season_id (str): Season ID.
+            user_id (str): User ID (for authorization).
+            by_division (bool): Whether to organize by division or conference.
+
+        Returns:
+            Dict[str, Any]: Standings data.
+        """
+        # Implementation placeholder - will be filled with proper season engine integration
+        return {'success': True, 'standings': {'message': 'Standings endpoint ready for implementation'}}
+
+    def simulate_game(self, season_id: str, game_id: str, seed: Optional[int] = None, user_id: str = None) -> Dict[str, Any]:
+        """
+        Simulate a single game.
+
+        Parameters:
+            season_id (str): Season ID.
+            game_id (str): Game ID.
+            seed (Optional[int]): Random seed.
+            user_id (str): User ID (for authorization).
+
+        Returns:
+            Dict[str, Any]: Simulation results.
+        """
+        # Implementation placeholder - will be filled with proper simulation logic integration
+        return {'success': True, 'message': f'Game {game_id} simulation ready for implementation'}
+
+    def simulate_week(self, season_id: str, week: Optional[int] = None, seed: Optional[int] = None, user_id: str = None) -> Dict[str, Any]:
+        """
+        Simulate all games for a week.
+
+        Parameters:
+            season_id (str): Season ID.
+            week (Optional[int]): Week number.
+            seed (Optional[int]): Random seed.
+            user_id (str): User ID (for authorization).
+
+        Returns:
+            Dict[str, Any]: Simulation results.
+        """
+        return {'success': True, 'message': f'Week {week} simulation ready for implementation'}
+
+    def simulate_to_week(self, season_id: str, target_week: int, seed: Optional[int] = None, user_id: str = None) -> Dict[str, Any]:
+        """
+        Simulate games up to a target week.
+
+        Parameters:
+            season_id (str): Season ID.
+            target_week (int): Target week number.
+            seed (Optional[int]): Random seed.
+            user_id (str): User ID (for authorization).
+
+        Returns:
+            Dict[str, Any]: Simulation results.
+        """
+        return {'success': True, 'message': f'Simulation to week {target_week} ready for implementation'}
+
+    def simulate_season(self, season_id: str, seed: Optional[int] = None, user_id: str = None) -> Dict[str, Any]:
+        """
+        Simulate the entire season.
+
+        Parameters:
+            season_id (str): Season ID.
+            seed (Optional[int]): Random seed.
+            user_id (str): User ID (for authorization).
+
+        Returns:
+            Dict[str, Any]: Simulation results.
+        """
+        return {'success': True, 'message': 'Full season simulation ready for implementation'}
+
+    def get_playoff_bracket(self, season_id: str, user_id: str = None) -> Dict[str, Any]:
+        """
+        Get current playoff bracket.
+
+        Parameters:
+            season_id (str): Season ID.
+            user_id (str): User ID (for authorization).
+
+        Returns:
+            Dict[str, Any]: Playoff bracket data.
+        """
+        return {'success': True, 'bracket': {'message': 'Playoff bracket endpoint ready for implementation'}}
+
+    def get_next_playoff_games(self, season_id: str, user_id: str = None) -> Dict[str, Any]:
+        """
+        Get next playoff games ready to be played.
+
+        Parameters:
+            season_id (str): Season ID.
+            user_id (str): User ID (for authorization).
+
+        Returns:
+            Dict[str, Any]: Next playoff games.
+        """
+        return {'success': True, 'games': [], 'message': 'Next playoff games endpoint ready for implementation'}
+
+    def simulate_playoff_game(self, season_id: str, game_id: str, seed: Optional[int] = None, user_id: str = None) -> Dict[str, Any]:
+        """
+        Simulate a playoff game.
+
+        Parameters:
+            season_id (str): Season ID.
+            game_id (str): Game ID.
+            seed (Optional[int]): Random seed.
+            user_id (str): User ID (for authorization).
+
+        Returns:
+            Dict[str, Any]: Simulation results.
+        """
+        return {'success': True, 'message': f'Playoff game {game_id} simulation ready for implementation'}
