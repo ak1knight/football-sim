@@ -13,6 +13,8 @@ from database.connection import get_db_manager
 from database.dao import TeamDAO, SeasonGameDAO
 from models.team import Team
 from simulation.game_engine import GameEngine, GameResult
+from simulation.schedule_generators import NFLScheduleGenerator
+from simulation.season_engine import SeasonEngine
 
 class SimulationAPI:
     """
@@ -174,7 +176,8 @@ class SimulationAPI:
 
             # Fetch teams from the database
             teams_data = team_dao.get_teams_by_abbreviations(team_ids)
-            team_lookup = {team['abbreviation']: Team(**team) for team in teams_data}
+            team_lookup = {team['abbreviation']: self._to_team_model(team) for team in teams_data}
+            team_id_lookup = {team['abbreviation']: team.get('id') for team in teams_data}
 
             # Validate team IDs
             valid_teams = []
@@ -187,37 +190,56 @@ class SimulationAPI:
             if len(valid_teams) < 2:
                 return {"error": "Need at least 2 teams for a season"}
 
-            # Generate season schedule (simplified round-robin)
+            engine = SeasonEngine(
+                teams=valid_teams,
+                season_year=datetime.now().year,
+                schedule_generator=NFLScheduleGenerator(),
+                seed=seed,
+            )
+
+            # Persist generated schedule if desired
+            db_game_ids = []
+            if season_id:
+                games_data = []
+                for game in engine.schedule:
+                    games_data.append({
+                        "season_id": season_id,
+                        "game_id": game.game_id,
+                        "week": game.week,
+                        "home_team_id": team_id_lookup.get(game.home_team.abbreviation),
+                        "away_team_id": team_id_lookup.get(game.away_team.abbreviation),
+                        "status": game.status.value,
+                        "game_date": game.scheduled_date,
+                        "home_score": 0,
+                        "away_score": 0,
+                    })
+                if games_data:
+                    db_game_ids = season_game_dao.bulk_create_games(games_data)
+
+            # Simulate schedule using engine and core GameEngine
             season_results = []
-            for i, home_team in enumerate(valid_teams):
-                for j, away_team in enumerate(valid_teams):
-                    if i != j:
-                        result = self.game_engine.simulate_game(home_team, away_team)
-                        season_results.append(self._format_game_result(result))
+            for idx, game in enumerate(engine.schedule):
+                result = self.game_engine.simulate_game(game.home_team, game.away_team)
+                engine.process_game_result(
+                    game.game_id,
+                    result.home_score,
+                    result.away_score,
+                    overtime=getattr(result, "overtime", False),
+                    game_duration=getattr(result, "duration", 60),
+                )
+                formatted_result = self._format_game_result(result)
+                formatted_result["game_id"] = game.game_id
+                formatted_result["week"] = game.week
+                season_results.append(formatted_result)
 
-                        # Persist each game if season_id is provided
-                        if season_id:
-                            game_id = season_game_dao.create_game(
-                                season_id=season_id,
-                                home_team_id=home_team.id,
-                                away_team_id=away_team.id,
-                                week=1,  # Or implement week logic as needed
-                                
-                            )
-                            season_game_dao.update_game_result(
-                                game_id=game_id,
-                                home_score=result.home_score,
-                                away_score=result.away_score,
-                                game_stats={
-                                    "home_score": result.home_score,
-                                    "away_score": result.away_score,
-                                    "duration": getattr(result, "duration", None),
-                                    "winner": getattr(result.winner, "abbreviation", None) if result.winner else None
-                                }
-                            )
+                if season_id and idx < len(db_game_ids):
+                    season_game_dao.update_game_result(
+                        game_id=db_game_ids[idx],
+                        home_score=result.home_score,
+                        away_score=result.away_score,
+                    )
 
-            # Standings calculation (in-memory, could be persisted if needed)
-            standings = self._calculate_standings(valid_teams)
+            standings = engine.get_standings()
 
             return {
                 "season_results": season_results,
@@ -267,3 +289,13 @@ class SimulationAPI:
             })
         standings_data.sort(key=lambda x: x["win_percentage"], reverse=True)
         return standings_data
+
+    def _to_team_model(self, team_data: Dict[str, Any]) -> Team:
+        """Convert DAO dictionaries into Team domain objects."""
+        return Team(
+            name=team_data.get("name"),
+            city=team_data.get("city"),
+            abbreviation=team_data.get("abbreviation"),
+            conference=team_data.get("conference"),
+            division=team_data.get("division"),
+        )

@@ -11,6 +11,9 @@ from flask import current_app
 
 from database.connection import get_db_manager
 from database.dao import SeasonDAO, SeasonTeamDAO, SeasonGameDAO, TeamDAO
+from models.team import Team
+from simulation.schedule_generators import NFLScheduleGenerator
+from simulation.season_engine import SeasonEngine
 
 from .season_formatters import (
     format_season_summary,
@@ -49,6 +52,109 @@ class SeasonAPI:
         """Initialize the Season API."""
         # Use Flask's app logger via current_app in methods
         self.logger = None  # Deprecated, use current_app.logger instead
+
+    def _dict_to_team(self, data: Any) -> Team:
+        """Convert various DB shapes into the engine's Team model."""
+        if isinstance(data, Team):
+            return data
+        name = data.get('team_name') or data.get('name')
+        city = data.get('team_city') or data.get('city')
+        abbreviation = data.get('team_abbreviation') or data.get('abbreviation')
+        conference = data.get('team_conference') or data.get('conference')
+        division = data.get('team_division') or data.get('division')
+        return Team(
+            name=name,
+            city=city,
+            abbreviation=abbreviation,
+            conference=conference,
+            division=division
+        )
+
+    def _normalize_schedule_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """Massage DAO schedule rows into SeasonEngine-friendly shape."""
+        return {
+            'game_id': row.get('game_id'),
+            'home_team_abbr': row.get('home_team_abbr') or row.get('home_team_abbreviation'),
+            'away_team_abbr': row.get('away_team_abbr') or row.get('away_team_abbreviation'),
+            'week': row.get('week'),
+            'status': row.get('status'),
+            'scheduled_date': row.get('game_date'),
+            'home_score': row.get('home_score'),
+            'away_score': row.get('away_score'),
+            'overtime': row.get('overtime', False),
+            'game_duration': row.get('game_duration', 60)
+        }
+
+    def _normalize_record_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """Massage DAO team record rows into SeasonEngine-friendly shape."""
+        return {
+            'team_abbr': row.get('team_abbr') or row.get('team_abbreviation'),
+            'wins': row.get('wins', 0),
+            'losses': row.get('losses', 0),
+            'ties': row.get('ties', 0),
+            'points_for': row.get('points_for', 0),
+            'points_against': row.get('points_against', 0),
+            'division_wins': row.get('division_wins', 0),
+            'division_losses': row.get('division_losses', 0),
+            'conference_wins': row.get('conference_wins', 0),
+            'conference_losses': row.get('conference_losses', 0)
+        }
+
+    def _load_engine(self, season_id: str, user_id: str, include_completed: bool = True):
+        """Load SeasonEngine and related DAO helpers once for a request."""
+        try:
+            db_manager = get_db_manager()
+            if not db_manager:
+                return None, {'success': False, 'error': 'Database connection not available'}
+            if not self._verify_season_access(season_id, user_id):
+                return None, {"success": False, "error": "Season not found or access denied"}
+
+            season_dao = SeasonDAO(db_manager)
+            season = season_dao.get_by_id(season_id)
+            if not season:
+                return None, {'success': False, 'error': 'Season not found'}
+
+            season_with_teams = season_dao.get_season_with_teams(season_id)
+            if not season_with_teams or 'teams' not in season_with_teams:
+                return None, {'success': False, 'error': 'Season teams not found'}
+
+            teams_raw = season_with_teams['teams']
+            team_objs = [self._dict_to_team(t) for t in teams_raw]
+            team_id_lookup = {}
+            for t in teams_raw:
+                abbr = t.get('team_abbreviation') or t.get('abbreviation')
+                if abbr:
+                    team_id_lookup[abbr] = t.get('team_id') or t.get('id')
+
+            season_game_dao = SeasonGameDAO(db_manager)
+            season_team_dao = SeasonTeamDAO(db_manager)
+            db_schedule = [self._normalize_schedule_row(g) for g in season_game_dao.get_season_games(season_id)]
+            completed_games = [self._normalize_schedule_row(g) for g in season_game_dao.get_completed_games(season_id)] if include_completed else []
+            db_records = [self._normalize_record_row(r) for r in season_team_dao.get_season_teams(season_id)]
+
+            engine = SeasonEngine.from_db(
+                teams=team_objs,
+                season_year=season['season_year'],
+                db_schedule=db_schedule,
+                db_records=db_records,
+                current_week=season['current_week'],
+                current_phase=season['phase'],
+                completed_games=completed_games,
+                schedule_generator=NFLScheduleGenerator(),
+                seed=season.get('seed') if hasattr(season, 'get') else None
+            )
+
+            return engine, {
+                'db_manager': db_manager,
+                'season': season,
+                'season_dao': season_dao,
+                'season_game_dao': season_game_dao,
+                'season_team_dao': season_team_dao,
+                'team_id_lookup': team_id_lookup
+            }
+        except Exception as e:
+            current_app.logger.error(f"Error loading season engine: {str(e)}")
+            return None, {'success': False, 'error': f'Failed to load season: {str(e)}'}
     
     def create_season(self, user_id: str, season_name: str, season_year: int = 2024,
                      selected_teams: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -199,64 +305,11 @@ class SeasonAPI:
         Get the current status of a season.
         Returns: Dict[str, Any]: Current season information and progress.
         """
+        engine, context = self._load_engine(season_id, user_id)
+        if not engine:
+            return context
+
         try:
-            db_manager = get_db_manager()
-            if not db_manager:
-                return {"success": False, "error": "Database connection not available"}
-            season_dao = SeasonDAO(db_manager)
-            season = season_dao.get_by_id(season_id)
-            if not season:
-                return {'success': False, 'error': 'Season not found'}
-            if str(season['user_id']) != str(user_id):
-                return {'success': False, 'error': 'Unauthorized'}
-
-            # Load teams, schedule, and records from DB (pseudo-code, adapt to your schema)
-            if not season:
-                return {'success': False, 'error': 'Season not found'}
-            if not season:
-                return {'success': False, 'error': 'Season not found'}
-            season_with_teams = season_dao.get_season_with_teams(season_id)
-            if not season_with_teams or 'teams' not in season_with_teams:
-                return {'success': False, 'error': 'Season teams not found'}
-            teams = season_with_teams['teams']
-            from models.team import Team
-            def dict_to_team(t):
-                if isinstance(t, Team):
-                    return t
-                keys = ['name', 'city', 'abbreviation', 'conference', 'division']
-                if all(k in t for k in keys):
-                    return Team(
-                        name=t['name'],
-                        city=t['city'],
-                        abbreviation=t['abbreviation'],
-                        conference=t['conference'],
-                        division=t['division']
-                    )
-                raise ValueError(f"Invalid team dict: {t}")
-            team_objs = [dict_to_team(t) for t in teams]
-
-            # Load schedule and records from DB
-            from database.dao import SeasonGameDAO, SeasonTeamDAO
-            season_game_dao = SeasonGameDAO(db_manager)
-            season_team_dao = SeasonTeamDAO(db_manager)
-            db_schedule = season_game_dao.get_season_games(season_id)
-            db_records = season_team_dao.get_season_teams(season_id)
-            completed_games = season_game_dao.get_completed_games(season_id)
-
-            from simulation.season_engine import SeasonEngine
-            from simulation.schedule_generators import NFLScheduleGenerator
-            engine = SeasonEngine.from_db(
-                teams=team_objs,
-                season_year=season['season_year'],
-                db_schedule=db_schedule,
-                db_records=db_records,
-                current_week=season['current_week'],
-                current_phase=season['phase'],
-                completed_games=completed_games,
-                schedule_generator=NFLScheduleGenerator(),
-                seed=season.get('seed')
-            )
-
             return {
                 'success': True,
                 'season': engine.to_db(),
@@ -267,69 +320,6 @@ class SeasonAPI:
             return {
                 'success': False,
                 'error': f'Failed to get season status: {str(e)}'
-            }
-        try:
-            db_manager = get_db_manager()
-            if not db_manager:
-                return {"success": False, "error": "Database connection not available"}
-            if not self._verify_season_access(season_id, user_id):
-                return {"success": False, "error": "Season not found or access denied"}
-            season_dao = SeasonDAO(db_manager)
-            season = season_dao.get_by_id(season_id)
-            if not season:
-                return {'success': False, 'error': 'Season not found'}
-            if not season:
-                return {'success': False, 'error': 'Season not found'}
-            season_with_teams = season_dao.get_season_with_teams(season_id)
-            if not season_with_teams or 'teams' not in season_with_teams:
-                return {'success': False, 'error': 'Season teams not found'}
-            teams = season_with_teams['teams']
-            from models.team import Team
-            def dict_to_team(t):
-                if isinstance(t, Team):
-                    return t
-                keys = ['name', 'city', 'abbreviation', 'conference', 'division']
-                if all(k in t for k in keys):
-                    return Team(
-                        name=t['name'],
-                        city=t['city'],
-                        abbreviation=t['abbreviation'],
-                        conference=t['conference'],
-                        division=t['division']
-                    )
-                raise ValueError(f"Invalid team dict: {t}")
-            team_objs = [dict_to_team(t) for t in teams]
-            # Load schedule and records from DB
-            from database.dao import SeasonGameDAO, SeasonTeamDAO
-            season_game_dao = SeasonGameDAO(db_manager)
-            season_team_dao = SeasonTeamDAO(db_manager)
-            db_schedule = season_game_dao.get_season_games(season_id)
-            db_records = season_team_dao.get_season_teams(season_id)
-            completed_games = season_game_dao.get_completed_games(season_id)
-            from simulation.season_engine import SeasonEngine
-            from simulation.schedule_generators import NFLScheduleGenerator
-            engine = SeasonEngine.from_db(
-                teams=team_objs,
-                season_year=season['season_year'],
-                db_schedule=db_schedule,
-                db_records=db_records,
-                current_week=season['current_week'],
-                current_phase=season['phase'],
-                completed_games=completed_games,
-                schedule_generator=NFLScheduleGenerator(),
-                seed=season.get('seed') if hasattr(season, 'get') else None
-            )
-            next_games = engine.get_next_games(limit=16)
-            return {
-                'success': True,
-                'games': [g.to_dict() for g in next_games],
-                'count': len(next_games)
-            }
-        except Exception as e:
-            current_app.logger.error(f"Error getting next games: {str(e)}")
-            return {
-                'success': False,
-                'error': f'Failed to get next games: {str(e)}'
             }
     
     def get_week_games(self, season_id: str, user_id: str, week: int) -> Dict[str, Any]:
@@ -344,55 +334,11 @@ class SeasonAPI:
         Returns:
             Dict[str, Any]: List of games for the specified week.
         """
+        engine, context = self._load_engine(season_id, user_id)
+        if not engine:
+            return context
+
         try:
-            db_manager = get_db_manager()
-            if not db_manager:
-                return {"success": False, "error": "Database connection not available"}
-            if not self._verify_season_access(season_id, user_id):
-                return {"success": False, "error": "Season not found or access denied"}
-            season_dao = SeasonDAO(db_manager)
-            season = season_dao.get_by_id(season_id)
-            if not season:
-                return {'success': False, 'error': 'Season not found'}
-            season_with_teams = season_dao.get_season_with_teams(season_id)
-            if not season_with_teams or 'teams' not in season_with_teams:
-                return {'success': False, 'error': 'Season teams not found'}
-            teams = season_with_teams['teams']
-            from models.team import Team
-            def dict_to_team(t):
-                if isinstance(t, Team):
-                    return t
-                keys = ['name', 'city', 'abbreviation', 'conference', 'division']
-                if all(k in t for k in keys):
-                    return Team(
-                        name=t['name'],
-                        city=t['city'],
-                        abbreviation=t['abbreviation'],
-                        conference=t['conference'],
-                        division=t['division']
-                    )
-                raise ValueError(f"Invalid team dict: {t}")
-            team_objs = [dict_to_team(t) for t in teams]
-            # Load schedule and records from DB
-            from database.dao import SeasonGameDAO, SeasonTeamDAO
-            season_game_dao = SeasonGameDAO(db_manager)
-            season_team_dao = SeasonTeamDAO(db_manager)
-            db_schedule = season_game_dao.get_season_games(season_id)
-            db_records = season_team_dao.get_season_teams(season_id)
-            completed_games = season_game_dao.get_completed_games(season_id)
-            from simulation.season_engine import SeasonEngine
-            from simulation.schedule_generators import NFLScheduleGenerator
-            engine = SeasonEngine.from_db(
-                teams=team_objs,
-                season_year=season['season_year'],
-                db_schedule=db_schedule,
-                db_records=db_records,
-                current_week=season['current_week'],
-                current_phase=season['phase'],
-                completed_games=completed_games,
-                schedule_generator=NFLScheduleGenerator(),
-                seed=season.get('seed') if hasattr(season, 'get') else None
-            )
             week_games = engine.get_week_games(week)
             return {
                 'success': True,
@@ -421,63 +367,30 @@ class SeasonAPI:
             overtime (bool): Whether the game went into overtime.
             game_stats (Optional[Dict[str, Any]]): Additional game statistics.
         """
-        try:
-            db_manager = get_db_manager()
-            if not db_manager:
-                return {'success': False, 'error': 'Database unavailable'}
-            if not self._verify_season_access(season_id, user_id):
-                return {'success': False, 'error': 'Unauthorized'}
+        engine, context = self._load_engine(season_id, user_id)
+        if not engine:
+            return context
 
-            # Update game result in DB
-            season_game_dao = SeasonGameDAO(db_manager)
+        try:
+            season_game_dao: SeasonGameDAO = context['season_game_dao']
+            season_team_dao: SeasonTeamDAO = context['season_team_dao']
+            season_dao: SeasonDAO = context['season_dao']
+            team_id_lookup = context.get('team_id_lookup', {})
+
             updated = season_game_dao.update_game_result(game_id, home_score, away_score)
             if not updated:
                 return {'success': False, 'error': 'Game not found or update failed'}
 
-            # Load teams, schedule, and records from DB
-            season_dao = SeasonDAO(db_manager)
-            season = season_dao.get_by_id(season_id)
-            if not season:
-                return {'success': False, 'error': 'Season not found'}
-            season_with_teams = season_dao.get_season_with_teams(season_id)
-            if not season_with_teams or 'teams' not in season_with_teams:
-                return {'success': False, 'error': 'Teams not found for season'}
-            teams = season_with_teams['teams']
-            from models.team import Team
-            def dict_to_team(t):
-                return Team(**t) if not isinstance(t, Team) else t
-            team_objs = [dict_to_team(t) for t in teams]
-
-            # Reload schedule and records from DB
-            db_schedule = season_game_dao.get_season_games(season_id)
-            from database.dao import SeasonTeamDAO
-            season_team_dao = SeasonTeamDAO(db_manager)
-            db_records = season_team_dao.get_season_teams(season_id)
-            completed_games = season_game_dao.get_completed_games(season_id)
-
-            from simulation.season_engine import SeasonEngine
-            from simulation.schedule_generators import NFLScheduleGenerator
-            engine = SeasonEngine.from_db(
-                teams=team_objs,
-                season_year=season['season_year'],
-                db_schedule=db_schedule,
-                db_records=db_records,
-                current_week=season['current_week'],
-                current_phase=season['phase'],
-                completed_games=completed_games,
-                schedule_generator=NFLScheduleGenerator(),
-                seed=season.get('seed')
-            )
-
-            # Update engine with new result (to update in-memory standings)
             engine.process_game_result(game_id, home_score, away_score, overtime=overtime)
 
-            # Update team records in DB
             for abbr, record in engine.records.items():
+                team_id = team_id_lookup.get(abbr)
+                if not team_id:
+                    continue
                 db_dict = record.to_db_dict()
                 season_team_dao.update_team_record(
                     season_id,
-                    abbr,
+                    team_id,
                     db_dict['wins'],
                     db_dict['losses'],
                     db_dict.get('ties', 0),
@@ -485,7 +398,6 @@ class SeasonAPI:
                     db_dict.get('points_against', 0)
                 )
 
-            # Optionally update season phase/week if needed
             season_dao.update_by_id(season_id, {
                 'current_week': engine.current_week,
                 'phase': engine.current_phase.value
@@ -514,63 +426,22 @@ class SeasonAPI:
         Returns:
             Dict[str, Any]: Complete schedule for the team.
         """
+        engine, context = self._load_engine(season_id, user_id)
+        if not engine:
+            return context
+
         try:
-            db_manager = get_db_manager()
-            if not db_manager:
-                return {"success": False, "error": "Database connection not available"}
-            if not self._verify_season_access(season_id, user_id):
-                return {"success": False, "error": "Season not found or access denied"}
-            season_dao = SeasonDAO(db_manager)
-            season = season_dao.get_by_id(season_id)
-            if not season:
-                return {'success': False, 'error': 'Season not found'}
-            season_with_teams = season_dao.get_season_with_teams(season_id)
-            if not season_with_teams or 'teams' not in season_with_teams:
-                return {'success': False, 'error': 'Season teams not found'}
-            teams = season_with_teams['teams']
-            from models.team import Team
-            def dict_to_team(t):
-                if isinstance(t, Team):
-                    return t
-                keys = ['name', 'city', 'abbreviation', 'conference', 'division']
-                if all(k in t for k in keys):
-                    return Team(
-                        name=t['name'],
-                        city=t['city'],
-                        abbreviation=t['abbreviation'],
-                        conference=t['conference'],
-                        division=t['division']
-                    )
-                raise ValueError(f"Invalid team dict: {t}")
-            team_objs = [dict_to_team(t) for t in teams]
-            from database.dao import SeasonGameDAO, SeasonTeamDAO
-            season_game_dao = SeasonGameDAO(db_manager)
-            season_team_dao = SeasonTeamDAO(db_manager)
-            db_schedule = season_game_dao.get_season_games(season_id)
-            db_records = season_team_dao.get_season_teams(season_id)
-            completed_games = season_game_dao.get_completed_games(season_id)
-            from simulation.season_engine import SeasonEngine
-            from simulation.schedule_generators import NFLScheduleGenerator
-            engine = SeasonEngine.from_db(
-                teams=team_objs,
-                season_year=season['season_year'],
-                db_schedule=db_schedule,
-                db_records=db_records,
-                current_week=season['current_week'],
-                current_phase=season['phase'],
-                completed_games=completed_games,
-                schedule_generator=NFLScheduleGenerator(),
-                seed=season.get('seed') if hasattr(season, 'get') else None
-            )
-            # Use team abbreviation for lookup
             team_abbr = None
-            for t in team_objs:
-                if hasattr(t, 'id') and str(getattr(t, 'id')) == str(team_id):
-                    team_abbr = t.abbreviation
-                elif isinstance(t, dict) and t.get('id') == team_id:
-                    team_abbr = t['abbreviation']
+            team_id_lookup = context.get('team_id_lookup', {})
+            # Attempt to match by ID string if provided
+            for abbr, tid in team_id_lookup.items():
+                if tid and str(tid) == str(team_id):
+                    team_abbr = abbr
+                    break
+
             if not team_abbr:
                 return {'success': False, 'error': 'Team not found in season'}
+
             schedule = engine.get_team_schedule(team_abbr)
             return {
                 'success': True,
@@ -597,56 +468,11 @@ class SeasonAPI:
         Returns:
             Dict[str, Any]: Next games ready for simulation.
         """
-        # This method should have been implemented already in the previous fetch.
-        # Re-implementing based on the pattern from other methods
+        engine, context = self._load_engine(season_id, user_id)
+        if not engine:
+            return context
+
         try:
-            db_manager = get_db_manager()
-            if not db_manager:
-                return {"success": False, "error": "Database connection not available"}
-            if not self._verify_season_access(season_id, user_id):
-                return {"success": False, "error": "Season not found or access denied"}
-            season_dao = SeasonDAO(db_manager)
-            season = season_dao.get_by_id(season_id)
-            if not season:
-                return {'success': False, 'error': 'Season not found'}
-            season_with_teams = season_dao.get_season_with_teams(season_id)
-            if not season_with_teams or 'teams' not in season_with_teams:
-                return {'success': False, 'error': 'Season teams not found'}
-            teams = season_with_teams['teams']
-            from models.team import Team
-            def dict_to_team(t):
-                if isinstance(t, Team):
-                    return t
-                keys = ['name', 'city', 'abbreviation', 'conference', 'division']
-                if all(k in t for k in keys):
-                    return Team(
-                        name=t['name'],
-                        city=t['city'],
-                        abbreviation=t['abbreviation'],
-                        conference=t['conference'],
-                        division=t['division']
-                    )
-                raise ValueError(f"Invalid team dict: {t}")
-            team_objs = [dict_to_team(t) for t in teams]
-            from database.dao import SeasonGameDAO, SeasonTeamDAO
-            season_game_dao = SeasonGameDAO(db_manager)
-            season_team_dao = SeasonTeamDAO(db_manager)
-            db_schedule = season_game_dao.get_season_games(season_id)
-            db_records = season_team_dao.get_season_teams(season_id)
-            completed_games = season_game_dao.get_completed_games(season_id)
-            from simulation.season_engine import SeasonEngine
-            from simulation.schedule_generators import NFLScheduleGenerator
-            engine = SeasonEngine.from_db(
-                teams=team_objs,
-                season_year=season['season_year'],
-                db_schedule=db_schedule,
-                db_records=db_records,
-                current_week=season['current_week'],
-                current_phase=season['phase'],
-                completed_games=completed_games,
-                schedule_generator=NFLScheduleGenerator(),
-                seed=season.get('seed') if hasattr(season, 'get') else None
-            )
             next_games = engine.get_next_games(limit=limit)
             return {
                 'success': True,
