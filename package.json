@@ -10,34 +10,32 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/dev.js",
+    "dev:proxy": "cross-env NODE_TLS_REJECT_UNAUTHORIZED=0 ELECTRON_GET_USE_PROXY=true node scripts/dev.js",
     "dev:renderer": "vite --config vite.config.electron.ts",
     "dev:electron": "tsc -p tsconfig.electron.json && electron dist-electron/main.js",
-    
     "build": "node scripts/build.js",
     "build:renderer": "vite build --config vite.config.electron.ts",
     "build:electron": "tsc -p tsconfig.electron.json",
-    
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "jest --config jest.config.js",
     "test:integration": "jest --config jest.integration.config.js",
     "test:database": "jest --config jest.database.config.js",
-    
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win",
-    "dist:mac": "npm run build && electron-builder --mac", 
+    "dist:mac": "npm run build && electron-builder --mac",
     "dist:linux": "npm run build && electron-builder --linux",
     "dist:all": "npm run build && electron-builder -mwl",
-    
     "lint": "eslint . --ext .ts,.tsx",
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
     "type-check": "tsc --noEmit",
-    
+    "rebuild": "electron-rebuild",
+    "rebuild:force": "electron-rebuild --force",
     "migrate:database": "node scripts/migrate-database.js",
     "seed:database": "node scripts/seed-database.js",
     "export:data": "node scripts/export-data.js"
   },
   "dependencies": {
-    "better-sqlite3": "^9.1.1",
+    "better-sqlite3": "^12.5.0",
     "mobx": "^6.13.7",
     "mobx-react-lite": "^4.1.0",
     "react": "^18.2.0",
@@ -45,6 +43,7 @@
     "react-router-dom": "^6.30.1"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.1",
     "@types/better-sqlite3": "^7.6.8",
     "@types/node": "^20.10.0",
     "@types/react": "^18.2.66",
@@ -55,7 +54,8 @@
     "autoprefixer": "^10.4.21",
     "chokidar": "^3.5.3",
     "concurrently": "^8.2.2",
-    "electron": "^27.0.0",
+    "cross-env": "^10.1.0",
+    "electron": "^39.2.4",
     "electron-builder": "^24.6.4",
     "eslint": "^8.57.0",
     "eslint-plugin-react-hooks": "^4.6.0",
@@ -83,18 +83,24 @@
       {
         "from": "assets/database/",
         "to": "database/",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "assets/icons/icon.ico"
@@ -103,7 +109,10 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ],
       "icon": "assets/icons/icon.icns",
@@ -113,11 +122,15 @@
       "target": [
         {
           "target": "AppImage",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "deb",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "assets/icons/",

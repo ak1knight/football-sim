@@ -1,6 +1,12 @@
 const { spawn, exec } = require('child_process');
 const chokidar = require('chokidar');
 const path = require('path');
+const os = require('os');
+
+// Windows compatibility helpers
+const isWindows = os.platform() === 'win32';
+const npmCmd = isWindows ? 'npm.cmd' : 'npm';
+const npxCmd = isWindows ? 'npx.cmd' : 'npx';
 
 let electronProcess = null;
 let rendererServer = null;
@@ -12,8 +18,9 @@ async function startRenderer() {
   console.log('🚀 Starting Vite dev server...');
   
   return new Promise((resolve, reject) => {
-    const viteProcess = spawn('npx', ['vite', '--config', 'vite.config.electron.ts', '--port', '5173'], {
-      stdio: ['pipe', 'pipe', 'pipe']
+    const viteProcess = spawn(npxCmd, ['vite', '--config', 'vite.config.electron.ts', '--port', '5173'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: isWindows
     });
 
     viteProcess.stdout.on('data', (data) => {
@@ -27,8 +34,9 @@ async function startRenderer() {
         process.env.VITE_DEV_SERVER_PORT = vitePort;
         console.log(`✅ Vite dev server started on port ${vitePort}`);
         resolve(viteProcess);
-      } else if (output.includes('ready in')) {
-        console.log('✅ Vite dev server started');
+      } else if (output.includes('ready in') && vitePort) {
+        // Ensure we have a port before resolving
+        console.log(`✅ Vite dev server ready on port ${vitePort}`);
         resolve(viteProcess);
       }
     });
@@ -51,7 +59,7 @@ function buildElectron() {
   console.log('🔧 Building Electron main process...');
   
   return new Promise((resolve, reject) => {
-    exec('npx tsc -p tsconfig.electron.json', (error, stdout, stderr) => {
+    exec(`${npxCmd} tsc -p tsconfig.electron.json`, (error, stdout, stderr) => {
       if (error) {
         console.error(`❌ TypeScript build failed:`, error);
         reject(error);
@@ -78,10 +86,11 @@ function startElectron() {
   }
 
   console.log('⚡ Starting Electron...');
+  console.log(`🔗 Connecting to Vite dev server on port ${vitePort}...`);
   
   const electronPath = require('electron');
   const args = [
-    '--inspect=9229',
+    '--inspect=9230',  // Use different port to avoid conflicts
     '--no-sandbox',
     '--disable-setuid-sandbox',
     path.join(__dirname, '../dist-electron/electron/main.js')
@@ -89,7 +98,8 @@ function startElectron() {
 
   electronProcess = spawn(electronPath, args, {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, VITE_DEV_SERVER_PORT: vitePort }
+    env: { ...process.env, VITE_DEV_SERVER_PORT: vitePort },
+    shell: isWindows
   });
   
   electronProcess.stdout.on('data', (data) => {

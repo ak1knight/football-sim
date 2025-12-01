@@ -1,43 +1,49 @@
 # Copilot Instructions for Football Simulation Engine
 
-This is a comprehensive American football simulation engine with a Python Flask backend, React TypeScript frontend, and PostgreSQL database. When working on this codebase:
+This is a comprehensive American football simulation engine built as an **Electron desktop application** with TypeScript services and SQLite for offline usage. When working on this codebase:
 
 ## Architecture Overview
 
-### Full-Stack Structure
-- **`backend/`**: Flask API server with SQLAlchemy, organized into blueprints (`/api/exhibition`, `/api/season`, `/api/teams`)
-- **`frontend/`**: React + TypeScript with Vite, MobX for state management, Tailwind CSS
-- **`database/`**: PostgreSQL with SQLAlchemy Core, DAO pattern for data access
-- **Deployment**: Docker Compose setup with separate dev/test databases
+### Electron Desktop Application Structure
+- **Main Process** (`electron/`): TypeScript services, IPC communication, SQLite database operations
+- **Renderer Process** (`src/`): React + TypeScript with Vite, MobX for state management, Tailwind CSS
+- **Database** (`electron/database/`): SQLite with better-sqlite3, DAO pattern for local storage
+- **Legacy Backend** (`backend/`): **DEPRECATED** - Flask/Python code being phased out
 
 ### Core Service Boundaries
-- **Season Engine** (`simulation/season_engine.py`): Manages full season scheduling, standings, playoffs - **NOT** individual game simulation
-- **Game Engine** (`simulation/game_engine.py`): Handles individual game play-by-play simulation with weather effects
-- **Database Layer** (`database/dao/`): DAO pattern with transaction management via `DatabaseManager` context managers
+- **Season Engine** (`electron/services/season-engine.ts`): Manages full season scheduling, standings, playoffs - **NOT** individual game simulation
+- **Game Engine** (`electron/services/game-engine.ts`): Handles individual game play-by-play simulation with weather effects
+- **Database Layer** (`electron/database/`): SQLite with better-sqlite3, DAO pattern with transaction management
+- **Legacy Python Services** (`backend/simulation/`): **DEPRECATED** - Being replaced by TypeScript services
 
 ## Critical Development Workflows
 
-### Running the Application
+### Electron Desktop Application
 ```bash
-# Backend (Flask API on :5000)
-cd backend && python app.py
+# Full development environment (RECOMMENDED)
+npm run dev  # Builds main process + starts renderer on :5173 + launches Electron
 
-# Frontend (React dev server on :5173) 
-cd frontend && npm run dev
+# Individual components for debugging
+npm run dev:renderer    # React dev server only
+npm run dev:electron    # Electron main process only
 
-# Database (PostgreSQL on :5432)
-docker-compose up postgres
+# Production builds
+npm run build           # Build for current platform
+npm run dist:all        # Package for Windows/macOS/Linux
 ```
 
 ### Testing Patterns
-- **Unit tests**: `python -m pytest tests/` (49+ tests, 100% pass rate required)
-- **Demo scripts**: Run `demo_*.py` files to see features in action before coding
-- **Database tests**: Use separate test containers via `docker-compose up postgres-test`
+- **TypeScript Services**: `npm run test:unit` for service layer unit tests
+- **Database Tests**: `npm run test:database` for SQLite integration tests
+- **Integration Tests**: `npm run test` for full test suite
+- **Legacy Python Tests**: `python -m pytest tests/` for deprecated backend (reference only)
+- **Demo Scripts**: Legacy `demo_*.py` files available for simulation logic reference
 
 ### Key Integration Points
-- **API Blueprints**: Register in `app.py` with URL prefixes (`/api/exhibition`, `/api/season`)
-- **Database Transactions**: Always use `DatabaseManager.transaction()` context manager
-- **CORS**: Frontend runs on :5173, backend expects requests from this origin
+- **Electron IPC**: Use `window.electronAPI.*` in renderer, implement handlers in `electron/ipc/ipc-main.ts`
+- **Database Transactions**: Always use SQLite `.transaction()` method via `DatabaseManager`
+- **Service Layer**: Implement business logic in `electron/services/`, expose via IPC
+- **React Renderer**: Components in `src/` communicate with main process via IPC only
 
 ## Project-Specific Patterns
 
@@ -56,10 +62,19 @@ class TeamStats:
 ```
 
 ### Database Access Pattern
-```python
-# Always use transaction context managers
-with db_manager.transaction() as conn:
-    result = season_dao.get_season_by_id(conn, season_id)
+```typescript
+// SQLite (Electron main process)
+const db = this.dbManager.getDatabase();
+db.transaction((conn) => {
+    const result = seasonDao.getSeasonById(conn, seasonId);
+})();
+
+// Service layer example
+class SeasonService {
+    async getSeasonById(seasonId: string): Promise<Season> {
+        return this.daoManager.seasonDao.getById(seasonId);
+    }
+}
 ```
 
 ### API Response Format
@@ -82,11 +97,12 @@ with db_manager.transaction() as conn:
 
 ## Common Tasks & Examples
 
-### Adding New API Endpoints
-1. Create blueprint in `api/` directory
-2. Register in `app.py` with URL prefix  
-3. Use DAO pattern for database access
-4. Add corresponding tests in `tests/test_api.py`
+### Adding New Features
+1. Implement service in `electron/services/` with business logic
+2. Add IPC handlers in `electron/ipc/ipc-main.ts` to expose service methods
+3. Use `window.electronAPI.*` in renderer components to call services
+4. Add tests in `npm run test:unit` for service logic
+5. Update DAO layer if new database operations are needed
 
 ### Extending Simulation Features
 1. Modify `GameEngine` for new mechanics
@@ -95,7 +111,8 @@ with db_manager.transaction() as conn:
 4. Ensure deterministic behavior with seeds
 
 ### Database Schema Changes
-1. Update `database/schema.py`
-2. Create migration in `database/migrations.py`
-3. Update corresponding DAO classes
-4. Test with both dev and test databases
+1. Update SQLite schema in `electron/database/database-manager.ts`
+2. Create migration script in database manager
+3. Update corresponding DAO classes in `electron/database/dao/`
+4. Test with SQLite database using `npm run test:database`
+5. Ensure migrations run automatically on app startup
