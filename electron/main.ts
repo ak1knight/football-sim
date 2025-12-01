@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import * as path from 'path';
 import { DatabaseManager } from './database/database-manager';
 import { DAOManager } from './database/dao/dao-manager';
@@ -68,8 +68,8 @@ class FootballSimApp {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
-        enableRemoteModule: false,
         preload: path.join(__dirname, 'preload.js'),
+        sandbox: false // Disable sandbox for development
       },
       titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
       show: false, // Don't show until ready
@@ -81,7 +81,8 @@ class FootballSimApp {
       this.mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
     } else {
       // Development: load from Vite dev server
-      this.mainWindow.loadURL('http://localhost:5173');
+      const devPort = process.env.VITE_DEV_SERVER_PORT || '5173';
+      this.mainWindow.loadURL(`http://localhost:${devPort}`);
       this.mainWindow.webContents.openDevTools();
     }
 
@@ -162,8 +163,9 @@ app.on('before-quit', async () => {
 
 // Security: Prevent new window creation
 app.on('web-contents-created', (event, contents) => {
-  contents.on('new-window', (navigationEvent, navigationURL) => {
-    navigationEvent.preventDefault();
+  contents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
   });
 });
 

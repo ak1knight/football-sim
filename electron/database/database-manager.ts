@@ -47,7 +47,9 @@ export class DatabaseManager {
       this.isInitialized = true;
       console.log(`✅ Database initialized at: ${this.dbPath}`);
     } catch (error) {
-      throw new DatabaseError(`Failed to initialize database: ${error.message}`, error);
+      console.error('Database initialization error:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new DatabaseError(`Failed to initialize database: ${errorMessage}`, error instanceof Error ? error : undefined);
     }
   }
 
@@ -106,7 +108,9 @@ export class DatabaseManager {
 
       console.log('✅ Database migrations complete');
     } catch (error) {
-      throw new DatabaseError(`Migration failed: ${error.message}`, error);
+      console.error(`Migration error:`, error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new DatabaseError(`Migration failed: ${errorMessage}`, error instanceof Error ? error : undefined);
     }
   }
 
@@ -128,7 +132,9 @@ export class DatabaseManager {
         console.log('📊 Database already contains data, skipping seed');
       }
     } catch (error) {
-      throw new DatabaseError(`Data seeding failed: ${error.message}`, error);
+      console.error('Seeding error:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new DatabaseError(`Data seeding failed: ${errorMessage}`, error instanceof Error ? error : undefined);
     }
   }
 
@@ -259,7 +265,7 @@ export class DatabaseManager {
     const transaction = this.db!.transaction(() => {
       let playerId = 1;
       
-      for (const team of teams) {
+      for (const team of teams as any[]) {
         // Create basic roster for each team
         const positions = [
           { pos: 'QB', count: 3, start: 1 },
@@ -385,7 +391,8 @@ export class DatabaseManager {
       this.db.backup(backupPath);
       console.log(`✅ Database backed up to: ${backupPath}`);
     } catch (error) {
-      throw new DatabaseError(`Backup failed: ${error.message}`, error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new DatabaseError(`Backup failed: ${errorMessage}`, error instanceof Error ? error : undefined);
     }
   }
 }

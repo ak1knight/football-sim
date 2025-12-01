@@ -192,4 +192,5 @@ config.local.py
 # Temporary simulation results
 simulation_results/
 game_logs/
-node_modules
+node_modules/
+dist-electron/

@@ -194,18 +194,31 @@ export abstract class BaseDAO<T> {
   }
 
   // Raw query execution for complex operations
-  protected executeQuery(query: string, params: any[] = []): any[] {
+  public executeQuery(query: string, params: any[] = []): any[] {
     const stmt = this.db.prepare(query);
     return stmt.all(...params);
   }
 
-  protected executeSingle(query: string, params: any[] = []): any {
+  public executeSingle(query: string, params: any[] = []): any {
     const stmt = this.db.prepare(query);
     return stmt.get(...params);
   }
 
-  protected executeUpdate(query: string, params: any[] = []): { changes: number; lastInsertRowid: number } {
+  public executeUpdate(query: string, params: any[] = []): { changes: number; lastInsertRowid: number } {
     const stmt = this.db.prepare(query);
-    return stmt.run(...params);
+    const result = stmt.run(...params);
+    return {
+      changes: result.changes,
+      lastInsertRowid: typeof result.lastInsertRowid === 'bigint' ? Number(result.lastInsertRowid) : result.lastInsertRowid
+    };
+  }
+
+  // Public methods for DAO Manager
+  public countRecords(whereClause?: string, params: any[] = []): number {
+    return this.count(whereClause, params);
+  }
+
+  public deleteRecord(id: string): boolean {
+    return this.delete(id);
   }
 }

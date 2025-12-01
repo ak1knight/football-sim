@@ -74,8 +74,8 @@ export class TeamDAO extends BaseDAO<Team> {
     if (!team) return false;
 
     const updatedStats = { ...team.stats, ...stats };
-    return this.update(teamId, { 
-      stats: this.stringifyJsonField(updatedStats),
+    return this.update(teamId, {
+      stats: this.stringifyJsonField(updatedStats) as any,
       updated_at: new Date().toISOString()
     });
   }
@@ -85,7 +85,7 @@ export class TeamDAO extends BaseDAO<Team> {
     const id = this.generateId('team');
     const now = new Date().toISOString();
     
-    const insertData = {
+    const insertData: any = {
       id,
       name: teamData.name,
       city: teamData.city,

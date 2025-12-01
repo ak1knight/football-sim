@@ -6,11 +6,13 @@ let electronProcess = null;
 let rendererServer = null;
 let manualRestart = false;
 
+let vitePort = '5173';
+
 async function startRenderer() {
   console.log('🚀 Starting Vite dev server...');
   
   return new Promise((resolve, reject) => {
-    const viteProcess = spawn('npx', ['vite', '--config', 'vite.config.electron.ts'], {
+    const viteProcess = spawn('npx', ['vite', '--config', 'vite.config.electron.ts', '--port', '5173'], {
       stdio: ['pipe', 'pipe', 'pipe']
     });
 
@@ -18,7 +20,14 @@ async function startRenderer() {
       const output = data.toString();
       console.log(`[Vite] ${output.trim()}`);
       
-      if (output.includes('Local:') && output.includes('5173')) {
+      // Extract port from Vite output
+      const portMatch = output.match(/Local:\s+http:\/\/localhost:(\d+)/);
+      if (portMatch) {
+        vitePort = portMatch[1];
+        process.env.VITE_DEV_SERVER_PORT = vitePort;
+        console.log(`✅ Vite dev server started on port ${vitePort}`);
+        resolve(viteProcess);
+      } else if (output.includes('ready in')) {
         console.log('✅ Vite dev server started');
         resolve(viteProcess);
       }
@@ -73,11 +82,14 @@ function startElectron() {
   const electronPath = require('electron');
   const args = [
     '--inspect=9229',
-    path.join(__dirname, '../dist-electron/main.js')
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    path.join(__dirname, '../dist-electron/electron/main.js')
   ];
 
   electronProcess = spawn(electronPath, args, {
-    stdio: ['pipe', 'pipe', 'pipe']
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, VITE_DEV_SERVER_PORT: vitePort }
   });
   
   electronProcess.stdout.on('data', (data) => {

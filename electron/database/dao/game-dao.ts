@@ -8,6 +8,8 @@ export interface GameData {
   play_by_play?: any[];
   drives?: any[];
   detailed_stats?: any;
+  overtime?: boolean;
+  duration?: number;
 }
 
 export interface Game {
@@ -32,14 +34,14 @@ export class GameDAO extends BaseDAO<Game> {
   create(gameData: Omit<Game, 'id'>): string {
     const id = this.generateId('game');
     
-    const insertData = {
+    const insertData: any = {
       id,
       season_id: gameData.season_id,
       week: gameData.week,
       home_team_id: gameData.home_team_id,
       away_team_id: gameData.away_team_id,
-      home_score: gameData.home_score || null,
-      away_score: gameData.away_score || null,
+      home_score: gameData.home_score ?? undefined,
+      away_score: gameData.away_score ?? undefined,
       status: gameData.status || 'scheduled',
       game_data: gameData.game_data ? this.stringifyJsonField(gameData.game_data) : null,
       simulated_at: gameData.simulated_at || null

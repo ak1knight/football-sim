@@ -5,7 +5,7 @@ export interface Season {
   id: string;
   name: string;
   year: number;
-  status: 'setup' | 'active' | 'completed';
+  status: 'setup' | 'active' | 'completed' | 'playoffs';
   current_week: number;
   created_at: string;
   updated_at: string;

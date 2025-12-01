@@ -51,7 +51,7 @@ export class DAOManager {
       dao.games.deleteSeasonGames(seasonId);
       
       // Delete the season
-      return dao.seasons.delete(seasonId);
+      return dao.seasons.deleteRecord(seasonId);
     });
   }
 
@@ -212,10 +212,10 @@ export class DAOManager {
 
   // Get database statistics
   getDatabaseStats(): any {
-    const teamCount = this.teams.count();
-    const seasonCount = this.seasons.count();
-    const gameCount = this.games.count();
-    const completedGameCount = this.games.count('status = ?', ['completed']);
+    const teamCount = this.teams.countRecords();
+    const seasonCount = this.seasons.countRecords();
+    const gameCount = this.games.countRecords();
+    const completedGameCount = this.games.countRecords('status = ?', ['completed']);
 
     return {
       teams: teamCount,
@@ -248,7 +248,7 @@ export class DAOManager {
     
     try {
       // Check if all teams exist
-      const teamCount = this.teams.count();
+      const teamCount = this.teams.countRecords();
       if (teamCount !== 32) {
         issues.push(`Expected 32 NFL teams, found ${teamCount}`);
       }
