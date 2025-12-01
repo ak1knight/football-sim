@@ -1,14 +1,10 @@
 import React from 'react';
 import { observer } from 'mobx-react-lite';
-import { appStore, userStore } from '../stores';
+import { appStore } from '../stores';
 
 export const Header: React.FC = observer(() => {
   const handleTabClick = (tab: string) => {
     appStore.setCurrentTab(tab);
-  };
-
-  const handleLogout = () => {
-    userStore.logout();
   };
 
   return (
@@ -29,34 +25,16 @@ export const Header: React.FC = observer(() => {
           ))}
         </div>
 
-        {/* Right side - User Info */}
+        {/* Right side - App Title */}
         <div className="flex items-center space-x-4">
-          {/* User Avatar and Info */}
-          <div className="flex items-center space-x-3">
-            <div className="w-8 h-8 bg-primary-600 rounded-full flex items-center justify-center text-white font-medium text-sm">
-              {userStore.userInitials}
+          <div className="text-sm">
+            <div className="text-white font-medium">
+              🏈 Football Simulation Engine
             </div>
-            <div className="text-sm">
-              <div className="text-white font-medium">
-                {userStore.displayName}
-              </div>
-              {userStore.user?.email && (
-                <div className="text-secondary-400 text-xs">
-                  {userStore.user.email}
-                </div>
-              )}
+            <div className="text-secondary-400 text-xs">
+              Desktop Edition
             </div>
           </div>
-
-          {/* Logout Button */}
-          {userStore.isAuthenticated && (
-            <button
-              onClick={handleLogout}
-              className="text-secondary-400 hover:text-white text-sm px-3 py-1 rounded border border-secondary-600 hover:border-secondary-500 transition-colors"
-            >
-              Logout
-            </button>
-          )}
         </div>
       </div>
 

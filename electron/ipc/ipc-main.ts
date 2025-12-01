@@ -66,6 +66,16 @@ export function setupIpcHandlers(daoManager: DAOManager): void {
   });
 
   // Season handlers
+  ipcMain.handle('seasons:getAll', async () => {
+    try {
+      const seasons = await seasonService.getAllSeasons();
+      return { success: true, data: seasons };
+    } catch (error) {
+      console.error('seasons:getAll error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
   ipcMain.handle('seasons:create', async (event, seasonData: any) => {
     try {
       const seasonId = await seasonService.createSeason(seasonData);

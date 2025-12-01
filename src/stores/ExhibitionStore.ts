@@ -1,4 +1,5 @@
 import { makeAutoObservable, runInAction } from 'mobx';
+import { apiFetch } from '../api';
 
 export interface Team {
   id: string;
@@ -85,17 +86,17 @@ export class ExhibitionStore {
     this.error = null;
 
     try {
-      const response = await fetch('/api/teams');
+      const response = await apiFetch('/api/teams/all');
       if (!response.ok) {
         throw new Error('Failed to fetch teams');
       }
       const data = await response.json();
       
       runInAction(() => {
-        // Handle the teams response format from the API
-        if (data.teams) {
-          this.teams = data.teams.map((team: any) => ({
-            id: team.abbreviation,
+        // Handle the teams response format from the IPC API
+        if (data.success && data.data) {
+          this.teams = data.data.map((team: any) => ({
+            id: team.id,
             name: team.name,
             city: team.city,
             abbreviation: team.abbreviation,
@@ -138,14 +139,12 @@ export class ExhibitionStore {
     this.error = null;
 
     try {
-      const response = await fetch('/api/exhibition/simulate', {
+      const response = await apiFetch(`/api/exhibition/simulate?homeTeam=${this.selectedHomeTeam.id}&awayTeam=${this.selectedAwayTeam.id}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          home_team: this.selectedHomeTeam.abbreviation,
-          away_team: this.selectedAwayTeam.abbreviation,
           game_settings: {
             detailed_stats: true
           }
@@ -159,20 +158,20 @@ export class ExhibitionStore {
       const result = await response.json();
       
       runInAction(() => {
-        if (result.success && result.game_result) {
-          const gameData = result.game_result;
+        if (result.success && result.data) {
+          const gameData = result.data;
           
           this.gameResult = {
             homeTeam: {
-              id: gameData.home_team.abbreviation,
+              id: gameData.home_team.id,
               name: gameData.home_team.name,
-              city: gameData.home_team.city,
+              city: gameData.home_team.name.split(' ')[0], // Extract city from full name
               abbreviation: gameData.home_team.abbreviation
             },
             awayTeam: {
-              id: gameData.away_team.abbreviation,
+              id: gameData.away_team.id,
               name: gameData.away_team.name,
-              city: gameData.away_team.city,
+              city: gameData.away_team.name.split(' ')[0], // Extract city from full name  
               abbreviation: gameData.away_team.abbreviation
             },
             homeScore: gameData.home_team.score,
@@ -180,21 +179,49 @@ export class ExhibitionStore {
             quarter: 4,
             timeRemaining: '00:00',
             gameComplete: true,
-            summary: `Final Score: ${gameData.away_team.city} ${gameData.away_team.score} - ${gameData.home_team.city} ${gameData.home_team.score}`,
+            summary: gameData.summary || `Final Score: ${gameData.away_team.name} ${gameData.away_team.score} - ${gameData.home_team.name} ${gameData.home_team.score}`,
             winner: gameData.winner ? {
-              team: gameData.winner.team ? {
-                id: gameData.winner.team.abbreviation,
-                name: gameData.winner.team.name,
-                city: gameData.winner.team.city,
-                abbreviation: gameData.winner.team.abbreviation
-              } : null,
-              margin: gameData.winner.margin,
-              tie: gameData.winner.tie
+              team: gameData.winner === 'home' ? this.gameResult?.homeTeam || null : 
+                    gameData.winner === 'away' ? this.gameResult?.awayTeam || null : null,
+              margin: Math.abs(gameData.home_team.score - gameData.away_team.score),
+              tie: gameData.winner === 'tie'
             } : undefined,
             weather: gameData.weather,
-            detailedStats: gameData.detailed_stats,
-            driveSummary: gameData.drive_summary,
-            keyPlays: gameData.key_plays
+            detailedStats: gameData.detailed_stats ? {
+              total_plays: (gameData.detailed_stats.home?.plays || 0) + (gameData.detailed_stats.away?.plays || 0),
+              total_drives: gameData.drives?.length || 0,
+              turnovers: { 
+                home: gameData.detailed_stats.home?.turnovers || 0, 
+                away: gameData.detailed_stats.away?.turnovers || 0 
+              },
+              time_of_possession: { 
+                home: gameData.detailed_stats.home?.timeOfPossession || 0, 
+                away: gameData.detailed_stats.away?.timeOfPossession || 0 
+              },
+              yards_gained: { 
+                home: gameData.detailed_stats.home?.totalYards || 0, 
+                away: gameData.detailed_stats.away?.totalYards || 0 
+              },
+              plays_by_type: { 
+                run: 0, // Would need to calculate from play-by-play
+                pass: 0, // Would need to calculate from play-by-play
+                turnover: (gameData.detailed_stats.home?.turnovers || 0) + (gameData.detailed_stats.away?.turnovers || 0)
+              },
+              average_yards_per_play: { 
+                home: gameData.detailed_stats.home ? (gameData.detailed_stats.home.totalYards / Math.max(gameData.detailed_stats.home.plays, 1)) : 0,
+                away: gameData.detailed_stats.away ? (gameData.detailed_stats.away.totalYards / Math.max(gameData.detailed_stats.away.plays, 1)) : 0
+              }
+            } : undefined,
+            driveSummary: gameData.drives?.map((drive: any, index: number) => ({
+              drive_number: index + 1,
+              quarter: 1, // Would need to calculate from drive data
+              offense: drive.team || 'Unknown',
+              starting_position: drive.startPosition || 'Unknown',
+              result: drive.result || 'Unknown',
+              points: drive.points || 0,
+              total_plays: drive.plays || 0,
+              total_yards: drive.yards || 0
+            })) || []
           };
         } else {
           throw new Error(result.error || 'Unknown error from simulation');

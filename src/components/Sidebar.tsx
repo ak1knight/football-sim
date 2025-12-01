@@ -1,20 +1,30 @@
 import React from 'react';
 import { observer } from 'mobx-react-lite';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { appStore } from '../stores';
 import type { Section } from '../stores';
 
 const sidebarItems = [
-  { key: 'exhibition' as Section, label: 'Exhibition Game', icon: '🏈' },
-  { key: 'season' as Section, label: 'Season Simulation', icon: '📅' },
-  { key: 'teams' as Section, label: 'Team Management', icon: '👥' },
-  { key: 'league' as Section, label: 'League Management', icon: '🏆' },
-  { key: 'settings' as Section, label: 'User Settings', icon: '⚙️' },
+  { key: 'exhibition' as Section, label: 'Exhibition Game', icon: '🏈', path: '/exhibition' },
+  { key: 'season' as Section, label: 'Season Simulation', icon: '📅', path: '/season' },
+  { key: 'teams' as Section, label: 'Team Management', icon: '👥', path: '/teams' },
+  { key: 'league' as Section, label: 'League Management', icon: '🏆', path: '/league' },
+  { key: 'settings' as Section, label: 'User Settings', icon: '⚙️', path: '/settings' },
 ];
 
 export const Sidebar: React.FC = observer(() => {
-  const handleSectionClick = (section: Section) => {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const handleSectionClick = (section: Section, path: string) => {
+    // Update the store state
     appStore.setCurrentSection(section);
+    // Navigate using React Router
+    navigate(path);
   };
+
+  // Get current section from URL path
+  const currentPath = location.pathname;
 
   return (
     <div className="w-64 bg-secondary-900 border-r border-secondary-700 flex flex-col">
@@ -29,9 +39,9 @@ export const Sidebar: React.FC = observer(() => {
         {sidebarItems.map((item) => (
           <div
             key={item.key}
-            onClick={() => handleSectionClick(item.key)}
+            onClick={() => handleSectionClick(item.key, item.path)}
             className={`sidebar-item ${
-              appStore.currentSection === item.key ? 'active' : ''
+              currentPath === item.path ? 'active' : ''
             }`}
           >
             <span className="text-xl mr-3">{item.icon}</span>

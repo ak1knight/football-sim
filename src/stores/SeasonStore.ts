@@ -1,6 +1,5 @@
 import { makeAutoObservable, runInAction } from 'mobx';
 import { apiFetch } from '../api';
-import { userStore } from './UserStore';
 
 // Hardcoded default user ID for backend API compatibility
 const DEFAULT_USER_ID = 'test-user-uuid';
@@ -195,7 +194,7 @@ export class SeasonStore {
     this.setLoading(true);
     this.setError(null);
     try {
-      const response = await apiFetch('/api/season/get_user_seasons', {
+      const response = await apiFetch('/api/seasons/all', {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' }
       });
@@ -243,7 +242,7 @@ export class SeasonStore {
     this.setError(null);
 
     try {
-      const response = await apiFetch('/api/season/create', {
+      const response = await apiFetch('/api/seasons/create', {
         method: 'POST',
         body: JSON.stringify({
           season_year: seasonYear,
@@ -254,18 +253,28 @@ export class SeasonStore {
 
       const result = await response.json();
 
-      if (result.success) {
+      if (result.success && result.data) {
         runInAction(() => {
-          this.currentSeason = result.season;
+          this.currentSeason = result.data.seasonId ? { 
+            id: result.data.seasonId,
+            season_year: seasonYear,
+            season_name: seasonName || `NFL ${seasonYear} Season`,
+            current_week: 1,
+            current_phase: 'regular_season',
+            completed_games: 0,
+            total_games: 272, // 32 teams * 17 games / 2
+            completion_percentage: 0
+          } : null;
+          this.selectedSeasonId = result.data.seasonId;
         });
 
         // Load additional data after creating season
         await this.loadTeams();
-        await this.loadNextGames();
-
-        // Automatically load games for the current week after season creation
-        if (this.currentSeason && this.currentSeason.current_week) {
-          await this.loadWeekGames(this.currentSeason.current_week);
+        
+        // Load season status with the new season ID
+        if (result.data.seasonId) {
+          await this.loadSeasonStatus(result.data.seasonId);
+          await this.loadNextGames();
         }
 
         return result;
@@ -288,7 +297,7 @@ export class SeasonStore {
       const paramsObj: Record<string, string> = {};
       if (id) paramsObj.season_id = id;
       const params = new URLSearchParams(paramsObj);
-      const response = await apiFetch(`/api/season/status?${params.toString()}`, {
+      const response = await apiFetch(`/api/seasons/status/${seasonId}`, {
         method: 'GET'
       });
       const result = await response.json();
@@ -309,8 +318,23 @@ export class SeasonStore {
 
   // No /api/season/teams endpoint in backend; consider removing or replacing this method.
   async loadTeams() {
-    // Placeholder: No-op or fetch from another endpoint if needed
-    return { success: false, error: 'Not implemented: no /api/season/teams endpoint in backend' };
+    try {
+      const response = await apiFetch('/api/teams/all');
+      const result = await response.json();
+      
+      if (result.success && result.data) {
+        runInAction(() => {
+          this.teams = result.data;
+        });
+        return { success: true };
+      } else {
+        this.setError(result.error || 'Failed to load teams');
+        return { success: false, error: result.error || 'Failed to load teams' };
+      }
+    } catch (error) {
+      this.setError(`Network error: ${error}`);
+      return { success: false, error: `Network error: ${error}` };
+    }
   }
 
   async loadNextGames(limit: number = 16) {
@@ -320,7 +344,7 @@ export class SeasonStore {
         return { success: false, error: 'No current season ID' };
       }
       const params = new URLSearchParams({ season_id: seasonId, user_id: DEFAULT_USER_ID, limit: limit.toString() });
-      const response = await apiFetch(`/api/season/next-games?${params.toString()}`, {
+      const response = await apiFetch(`/api/seasons/next-games/${this.selectedSeasonId}?${params.toString()}`, {
         method: 'GET',
       });
       const result = await response.json();
@@ -345,7 +369,7 @@ export class SeasonStore {
         return { success: false, error: 'No current season ID' };
       }
       const params = new URLSearchParams({ season_id: seasonId, user_id: DEFAULT_USER_ID });
-      const response = await apiFetch(`/api/season/week/${week}?${params.toString()}`, {
+      const response = await apiFetch(`/api/seasons/week-games/${this.selectedSeasonId}/${week}`, {
         method: 'GET',
       });
       const result = await response.json();
@@ -372,7 +396,7 @@ export class SeasonStore {
         return { success: false, error: 'No current season ID' };
       }
       const params = new URLSearchParams({ season_id: seasonId, user_id: DEFAULT_USER_ID, by_division: String(byDivision) });
-      const response = await apiFetch(`/api/season/standings?${params.toString()}`, {
+      const response = await apiFetch(`/api/seasons/standings/${this.selectedSeasonId}`, {
         method: 'GET',
       });
       const result = await response.json();
@@ -397,7 +421,7 @@ export class SeasonStore {
     this.setError(null);
     
     try {
-      const response = await fetch('/api/season/simulate-game', {
+      const response = await apiFetch('/api/seasons/simulate-game', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ game_id: gameId, seed })
@@ -436,7 +460,7 @@ export class SeasonStore {
     this.setError(null);
     
     try {
-      const response = await fetch('/api/season/simulate-week', {
+      const response = await apiFetch('/api/seasons/simulate-week', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ week, seed })
@@ -481,7 +505,7 @@ export class SeasonStore {
     this.setError(null);
     
     try {
-      const response = await fetch('/api/season/simulate-to-week', {
+      const response = await apiFetch('/api/seasons/simulate-to-week', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ target_week: targetWeek, seed })
@@ -526,7 +550,7 @@ export class SeasonStore {
     this.setError(null);
     
     try {
-      const response = await fetch('/api/season/simulate-season', {
+      const response = await apiFetch('/api/seasons/simulate-season', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ seed })
@@ -569,7 +593,7 @@ export class SeasonStore {
   // Playoff methods
   async loadPlayoffBracket() {
     try {
-      const response = await fetch('/api/season/playoffs/bracket');
+      const response = await apiFetch(`/api/seasons/playoff-bracket/${this.selectedSeasonId}`);
       const result = await response.json();
       
       if (result.success) {
@@ -587,7 +611,7 @@ export class SeasonStore {
 
   async loadNextPlayoffGames() {
     try {
-      const response = await fetch('/api/season/playoffs/next-games');
+      const response = await apiFetch(`/api/seasons/next-games/${this.selectedSeasonId}`);
       const result = await response.json();
       
       if (result.success) {
@@ -608,7 +632,7 @@ export class SeasonStore {
     this.setError(null);
     
     try {
-      const response = await fetch('/api/season/playoffs/simulate-game', {
+      const response = await apiFetch(`/api/seasons/simulate-playoff-game/${gameId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ game_id: gameId, seed })

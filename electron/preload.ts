@@ -17,6 +17,7 @@ const electronAPI = {
   
   // Season API
   seasons: {
+    getAll: () => ipcRenderer.invoke('seasons:getAll'),
     create: (seasonData: any) => ipcRenderer.invoke('seasons:create', seasonData),
     getStatus: (seasonId: string) => ipcRenderer.invoke('seasons:getStatus', seasonId),
     getStandings: (seasonId: string) => ipcRenderer.invoke('seasons:getStandings', seasonId),

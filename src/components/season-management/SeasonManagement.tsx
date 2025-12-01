@@ -114,13 +114,8 @@ const SeasonManagement: React.FC = observer(() => {
 				))}
 			</div>
 			{seasonStore.allSeasons.length === 0 ? (
-				<div className="card p-8 text-center">
-					<div className="text-6xl mb-4">🏈</div>
-					<h2 className="text-xl font-semibold text-white mb-2">No Seasons Found</h2>
-					<p className="text-secondary-400 mb-6">
-						Create a new season to get started.
-					</p>
-				</div>
+				// When no seasons exist, always show the Setup tab (which has season creation)
+				<SeasonSetup />
 			) : (
 				renderContent()
 			)}
