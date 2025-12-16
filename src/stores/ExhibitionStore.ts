@@ -48,6 +48,17 @@ export interface GameResult {
     points: number;
     total_plays: number;
     total_yards: number;
+    final_play_description?: string;
+    play_log?: Array<{
+      quarter: number;
+      down: number;
+      yards_to_go: number;
+      start_field: number;
+      end_field: number;
+      play_type: string;
+      yards_gained: number;
+      clock: string;
+    }>;
   }>;
   keyPlays?: Array<{
     quarter: number;
@@ -188,39 +199,41 @@ export class ExhibitionStore {
             } : undefined,
             weather: gameData.weather,
             detailedStats: gameData.detailed_stats ? {
-              total_plays: (gameData.detailed_stats.home?.plays || 0) + (gameData.detailed_stats.away?.plays || 0),
-              total_drives: gameData.drives?.length || 0,
+              total_plays: gameData.detailed_stats.total_plays || 0,
+              total_drives: gameData.detailed_stats.total_drives || 0,
               turnovers: { 
                 home: gameData.detailed_stats.home?.turnovers || 0, 
                 away: gameData.detailed_stats.away?.turnovers || 0 
               },
               time_of_possession: { 
-                home: gameData.detailed_stats.home?.timeOfPossession || 0, 
-                away: gameData.detailed_stats.away?.timeOfPossession || 0 
+                home: gameData.detailed_stats.home?.time_of_possession || 0, 
+                away: gameData.detailed_stats.away?.time_of_possession || 0 
               },
               yards_gained: { 
-                home: gameData.detailed_stats.home?.totalYards || 0, 
-                away: gameData.detailed_stats.away?.totalYards || 0 
+                home: gameData.detailed_stats.home?.total_yards || 0, 
+                away: gameData.detailed_stats.away?.total_yards || 0 
               },
               plays_by_type: { 
-                run: 0, // Would need to calculate from play-by-play
-                pass: 0, // Would need to calculate from play-by-play
-                turnover: (gameData.detailed_stats.home?.turnovers || 0) + (gameData.detailed_stats.away?.turnovers || 0)
+                run: gameData.detailed_stats.play_type_counts?.run || 0,
+                pass: gameData.detailed_stats.play_type_counts?.pass || 0,
+                turnover: gameData.detailed_stats.play_type_counts?.turnover || 0
               },
               average_yards_per_play: { 
-                home: gameData.detailed_stats.home ? (gameData.detailed_stats.home.totalYards / Math.max(gameData.detailed_stats.home.plays, 1)) : 0,
-                away: gameData.detailed_stats.away ? (gameData.detailed_stats.away.totalYards / Math.max(gameData.detailed_stats.away.plays, 1)) : 0
+                home: gameData.detailed_stats.home ? (gameData.detailed_stats.home.total_yards / Math.max(gameData.detailed_stats.home.plays, 1)) : 0,
+                away: gameData.detailed_stats.away ? (gameData.detailed_stats.away.total_yards / Math.max(gameData.detailed_stats.away.plays, 1)) : 0
               }
             } : undefined,
-            driveSummary: gameData.drives?.map((drive: any, index: number) => ({
-              drive_number: index + 1,
-              quarter: 1, // Would need to calculate from drive data
-              offense: drive.team || 'Unknown',
-              starting_position: drive.startPosition || 'Unknown',
-              result: drive.result || 'Unknown',
-              points: drive.points || 0,
-              total_plays: drive.plays || 0,
-              total_yards: drive.yards || 0
+            driveSummary: gameData.drives?.map((drive: any) => ({
+              drive_number: drive.drive_number,
+              quarter: drive.quarter,
+              offense: drive.offense,
+              starting_position: drive.starting_position,
+              result: drive.result,
+              points: drive.points,
+              total_plays: drive.total_plays,
+              total_yards: drive.total_yards,
+              final_play_description: drive.final_play_description,
+              play_log: drive.play_log
             })) || []
           };
         } else {

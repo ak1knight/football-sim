@@ -87,8 +87,8 @@ export class SeasonDAO extends BaseDAO<Season> {
 
   // Set current week
   setCurrentWeek(seasonId: string, week: number): boolean {
-    if (week < 1 || week > 21) { // Regular season (1-17) + playoffs (18-21)
-      throw new Error('Week must be between 1 and 21');
+    if (week < 1 || week > 22) { // Regular season (1-18) + playoffs (18-22)
+      throw new Error('Week must be between 1 and 22');
     }
 
     return this.update(seasonId, {
@@ -121,45 +121,7 @@ export class SeasonDAO extends BaseDAO<Season> {
     });
   }
 
-  // Get season statistics
-  getSeasonStats(seasonId: string): any {
-    const season = this.getById(seasonId);
-    if (!season) return null;
-
-    // Get related game statistics
-    const gameStats = this.executeQuery(`
-      SELECT 
-        COUNT(*) as total_games,
-        COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_games,
-        COUNT(CASE WHEN status = 'scheduled' THEN 1 END) as remaining_games,
-        MAX(week) as max_week
-      FROM season_games 
-      WHERE season_id = ?
-    `, [seasonId])[0];
-
-    const completionPercentage = gameStats.total_games > 0 
-      ? (gameStats.completed_games / gameStats.total_games) * 100 
-      : 0;
-
-    return {
-      season: {
-        id: season.id,
-        name: season.name,
-        year: season.year,
-        status: season.status,
-        current_week: season.current_week,
-        created_at: season.created_at,
-        updated_at: season.updated_at
-      },
-      games: {
-        total: gameStats.total_games || 0,
-        completed: gameStats.completed_games || 0,
-        remaining: gameStats.remaining_games || 0,
-        max_week: gameStats.max_week || 0,
-        completion_percentage: Math.round(completionPercentage)
-      }
-    };
-  }
+  // Removed duplicate getSeasonStats method - keeping the newer implementation below
 
   // Delete season and all related data
   deleteSeason(seasonId: string): boolean {
@@ -255,6 +217,40 @@ export class SeasonDAO extends BaseDAO<Season> {
   // Get recent seasons for quick access
   getRecentSeasons(limit: number = 5): Season[] {
     return this.findAll(limit, 'updated_at DESC');
+  }
+
+  // Get season statistics
+  getSeasonStats(seasonId: string): any {
+    // Get total games for the season
+    const totalGames = this.db.prepare(`
+      SELECT COUNT(*) as total FROM season_games WHERE season_id = ?
+    `).get(seasonId) as { total: number };
+
+    // Get completed games for the season
+    const completedGames = this.db.prepare(`
+      SELECT COUNT(*) as completed FROM season_games 
+      WHERE season_id = ? AND status IN ('completed', 'simulated')
+    `).get(seasonId) as { completed: number };
+
+    // Get remaining games
+    const remainingGames = this.db.prepare(`
+      SELECT COUNT(*) as remaining FROM season_games 
+      WHERE season_id = ? AND status = 'scheduled'
+    `).get(seasonId) as { remaining: number };
+
+    const total = totalGames?.total || 0;
+    const completed = completedGames?.completed || 0;
+    const remaining = remainingGames?.remaining || 0;
+    const completionPercentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+    return {
+      games: {
+        total,
+        completed,
+        remaining,
+        completion_percentage: completionPercentage
+      }
+    };
   }
 
   // Map database row to Season entity

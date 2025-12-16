@@ -219,17 +219,23 @@ export class SeasonEngine {
   }
 
   getPlayoffBracket(): PlayoffBracket | null {
-    const engine = this.playoffEngine ?? new PlayoffEngine(this.seasonYear, Object.values(this.records));
-    if (!engine.bracket) {
-      engine.generatePlayoffBracket();
+    if (!this.playoffEngine) {
+      this.playoffEngine = new PlayoffEngine(this.seasonYear, Object.values(this.records));
     }
-    return engine.bracket;
+    if (!this.playoffEngine.bracket) {
+      this.playoffEngine.generatePlayoffBracket();
+    }
+    return this.playoffEngine.bracket;
   }
 
   getNextPlayoffGames() {
-    const engine = this.playoffEngine ?? new PlayoffEngine(this.seasonYear, Object.values(this.records));
-    if (!engine.bracket) engine.generatePlayoffBracket();
-    return engine.getNextPlayoffGames();
+    if (!this.playoffEngine) {
+      this.playoffEngine = new PlayoffEngine(this.seasonYear, Object.values(this.records));
+    }
+    if (!this.playoffEngine.bracket) {
+      this.playoffEngine.generatePlayoffBracket();
+    }
+    return this.playoffEngine.getNextPlayoffGames();
   }
 
   private getDivisionStandings(): Record<string, TeamRecord[]> {

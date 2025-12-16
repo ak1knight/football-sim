@@ -38,8 +38,19 @@ const GameResult: React.FC = observer(() => {
   const [showDetailedStats, setShowDetailedStats] = useState(true);
   const [showKeyPlays, setShowKeyPlays] = useState(true);
   const [showDriveDetails, setShowDriveDetails] = useState(false);
+  const [expandedDrives, setExpandedDrives] = useState<Set<number>>(new Set());
 
   if (!gameResult) return null;
+
+  const toggleDrive = (driveNumber: number) => {
+    const newExpanded = new Set(expandedDrives);
+    if (newExpanded.has(driveNumber)) {
+      newExpanded.delete(driveNumber);
+    } else {
+      newExpanded.add(driveNumber);
+    }
+    setExpandedDrives(newExpanded);
+  };
 
   return (
     <div className="space-y-6">
@@ -124,14 +135,14 @@ const GameResult: React.FC = observer(() => {
                 <div className="space-y-3">
                   <StatComparison
                     label="Total Yards"
-                    awayValue={gameResult.detailedStats.yards_gained.away}
-                    homeValue={gameResult.detailedStats.yards_gained.home}
+                    awayValue={Math.round(gameResult.detailedStats.yards_gained.away)}
+                    homeValue={Math.round(gameResult.detailedStats.yards_gained.home)}
                   />
                   
                   <StatComparison
                     label="Avg Yards/Play"
-                    awayValue={gameResult.detailedStats.average_yards_per_play.away}
-                    homeValue={gameResult.detailedStats.average_yards_per_play.home}
+                    awayValue={gameResult.detailedStats.average_yards_per_play.away.toFixed(1)}
+                    homeValue={gameResult.detailedStats.average_yards_per_play.home.toFixed(1)}
                   />
                   
                   <StatComparison
@@ -143,8 +154,8 @@ const GameResult: React.FC = observer(() => {
                   
                   <StatComparison
                     label="Time of Possession"
-                    awayValue={`${gameResult.detailedStats.time_of_possession.away}:00`}
-                    homeValue={`${gameResult.detailedStats.time_of_possession.home}:00`}
+                    awayValue={`${Math.floor(gameResult.detailedStats.time_of_possession.away / 60)}:${String(gameResult.detailedStats.time_of_possession.away % 60).padStart(2, '0')}`}
+                    homeValue={`${Math.floor(gameResult.detailedStats.time_of_possession.home / 60)}:${String(gameResult.detailedStats.time_of_possession.home % 60).padStart(2, '0')}`}
                     valueColor="text-accent-400"
                   />
                 </div>
@@ -254,6 +265,7 @@ const GameResult: React.FC = observer(() => {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-secondary-700">
+                    <th className="text-left text-secondary-300 font-medium py-2 w-8"></th>
                     <th className="text-left text-secondary-300 font-medium py-2">#</th>
                     <th className="text-left text-secondary-300 font-medium py-2">Q</th>
                     <th className="text-left text-secondary-300 font-medium py-2">Team</th>
@@ -265,33 +277,91 @@ const GameResult: React.FC = observer(() => {
                   </tr>
                 </thead>
                 <tbody>
-                  {gameResult.driveSummary.slice(0, 10).map((drive, index) => (
-                    <tr key={index} className="border-b border-secondary-800">
-                      <td className="py-2 text-white">{drive.drive_number}</td>
-                      <td className="py-2 text-secondary-300">{drive.quarter}</td>
-                      <td className="py-2 text-white">{drive.offense}</td>
-                      <td className="py-2 text-secondary-300">{drive.starting_position}</td>
-                      <td className="py-2">
-                        <span className={`${
-                          drive.points > 0
-                            ? 'text-green-400'
-                            : drive.result.toLowerCase().includes('punt')
-                              ? 'text-secondary-300'
-                              : 'text-red-400'
-                        }`}>
-                          {drive.result.replace('_', ' ')}
-                        </span>
-                      </td>
-                      <td className="py-2 text-secondary-300">{drive.total_plays}</td>
-                      <td className="py-2 text-secondary-300">{drive.total_yards}</td>
-                      <td className="py-2">
-                        {drive.points > 0 ? (
-                          <span className="text-green-400 font-medium">+{drive.points}</span>
-                        ) : (
-                          <span className="text-secondary-500">0</span>
-                        )}
-                      </td>
-                    </tr>
+                  {gameResult.driveSummary.map((drive, index) => (
+                    <React.Fragment key={index}>
+                      <tr 
+                        className="border-b border-secondary-800 hover:bg-secondary-800/50 cursor-pointer transition-colors"
+                        onClick={() => toggleDrive(drive.drive_number)}
+                      >
+                        <td className="py-2 text-secondary-400">
+                          <span className="text-xs">
+                            {expandedDrives.has(drive.drive_number) ? '▼' : '▶'}
+                          </span>
+                        </td>
+                        <td className="py-2 text-white">{drive.drive_number}</td>
+                        <td className="py-2 text-secondary-300">{drive.quarter}</td>
+                        <td className="py-2 text-white">{drive.offense}</td>
+                        <td className="py-2 text-secondary-300">{drive.starting_position}</td>
+                        <td className="py-2">
+                          <div>
+                            <span className={`${
+                              drive.points > 0
+                                ? 'text-green-400'
+                                : drive.result.toLowerCase().includes('punt')
+                                  ? 'text-secondary-300'
+                                  : 'text-red-400'
+                            }`}>
+                              {drive.result.replace('_', ' ')}
+                            </span>
+                            {drive.final_play_description && (
+                              <div className="text-xs text-secondary-400 mt-0.5">
+                                {drive.final_play_description}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-2 text-secondary-300">{drive.total_plays}</td>
+                        <td className="py-2 text-secondary-300">{drive.total_yards}</td>
+                        <td className="py-2">
+                          {drive.points > 0 ? (
+                            <span className="text-green-400 font-medium">+{drive.points}</span>
+                          ) : (
+                            <span className="text-secondary-500">0</span>
+                          )}
+                        </td>
+                      </tr>
+                      {expandedDrives.has(drive.drive_number) && drive.play_log && (
+                        <tr className="border-b border-secondary-800">
+                          <td colSpan={9} className="py-3 px-4 bg-secondary-900/50">
+                            <div className="space-y-1">
+                              <div className="text-xs font-medium text-secondary-400 mb-2">PLAY-BY-PLAY</div>
+                              {drive.play_log.map((play, playIndex) => (
+                                <div 
+                                  key={playIndex} 
+                                  className="flex items-center justify-between text-xs py-1.5 px-2 rounded hover:bg-secondary-800/50"
+                                >
+                                  <div className="flex items-center space-x-3">
+                                    <span className="text-secondary-500 w-12">{play.clock}</span>
+                                    <span className="text-secondary-400 w-16">
+                                      {play.down}{play.down === 1 ? 'st' : play.down === 2 ? 'nd' : play.down === 3 ? 'rd' : 'th'} & {play.yards_to_go}
+                                    </span>
+                                    <span className="text-secondary-400 w-12">at {play.start_field}</span>
+                                    <span className={`font-medium ${
+                                      play.play_type === 'run' ? 'text-green-400' : 
+                                      play.play_type === 'pass' ? 'text-blue-400' : 
+                                      play.play_type === 'turnover' ? 'text-red-400' : 
+                                      'text-secondary-300'
+                                    }`}>
+                                      {play.play_type.toUpperCase()}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center space-x-2">
+                                    <span className={`font-medium ${
+                                      play.yards_gained > 0 ? 'text-green-400' : 
+                                      play.yards_gained < 0 ? 'text-red-400' : 
+                                      'text-secondary-400'
+                                    }`}>
+                                      {play.yards_gained > 0 ? '+' : ''}{play.yards_gained} yds
+                                    </span>
+                                    <span className="text-secondary-500">→ {play.end_field}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>

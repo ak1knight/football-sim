@@ -35,6 +35,11 @@ interface ElectronAPI {
     unmaximize: () => Promise<any>;
     close: () => Promise<any>;
   };
+  debug: {
+    listSeasons: () => Promise<any>;
+    tableCounts: () => Promise<any>;
+    seasonGames: (seasonId?: string) => Promise<any>;
+  };
 }
 
 // Global electron API available on window object
@@ -142,66 +147,64 @@ async function handleSeasonsAPI(action: string, pathParts: string[], params: URL
       return await electronAPI.seasons.create(seasonData);
       
     case 'status':
-      const statusSeasonId = pathParts[0];
+      const statusSeasonId = pathParts[1]; // Fixed: was pathParts[0]
       if (!statusSeasonId) throw new Error('Season ID required');
       return await electronAPI.seasons.getStatus(statusSeasonId);
       
     case 'standings':
-      const standingsSeasonId = pathParts[0];
+      const standingsSeasonId = pathParts[1]; // Fixed: was pathParts[0]
       if (!standingsSeasonId) throw new Error('Season ID required');
       return await electronAPI.seasons.getStandings(standingsSeasonId);
       
     case 'next-games':
-      const nextGamesSeasonId = pathParts[0];
+      const nextGamesSeasonId = pathParts[1]; // Fixed: was pathParts[0]
       const limit = params.get('limit') ? parseInt(params.get('limit')!) : undefined;
       if (!nextGamesSeasonId) throw new Error('Season ID required');
       return await electronAPI.seasons.getNextGames(nextGamesSeasonId, limit);
       
     case 'week-games':
-      const weekSeasonId = pathParts[0];
-      const week = parseInt(pathParts[1] || params.get('week') || '1');
+      const weekSeasonId = pathParts[1]; // Fixed: was pathParts[0]
+      const week = parseInt(pathParts[2] || params.get('week') || '1'); // Fixed: was pathParts[1]
       if (!weekSeasonId) throw new Error('Season ID required');
       return await electronAPI.seasons.getWeekGames(weekSeasonId, week);
       
     case 'team-schedule':
-      const scheduleSeasonId = pathParts[0];
-      const scheduleTeamId = pathParts[1] || params.get('teamId');
+      const scheduleSeasonId = pathParts[1]; // Fixed: was pathParts[0]
+      const scheduleTeamId = pathParts[2] || params.get('teamId'); // Fixed: was pathParts[1]
       if (!scheduleSeasonId || !scheduleTeamId) throw new Error('Season ID and Team ID required');
       return await electronAPI.seasons.getTeamSchedule(scheduleSeasonId, scheduleTeamId);
       
     case 'simulate-game':
-      const gameId = pathParts[0] || params.get('gameId');
-      const gameOptions = options.body ? JSON.parse(options.body as string) : undefined;
+      const gameOptions = options.body ? JSON.parse(options.body as string) : {};
+      const gameId = gameOptions.game_id || pathParts[0] || params.get('gameId');
       if (!gameId) throw new Error('Game ID required');
       return await electronAPI.seasons.simulateGame(gameId, gameOptions);
       
     case 'simulate-week':
-      const simWeekSeasonId = pathParts[0];
-      const simWeek = parseInt(pathParts[1] || params.get('week') || '1');
-      const weekOptions = options.body ? JSON.parse(options.body as string) : undefined;
-      if (!simWeekSeasonId) throw new Error('Season ID required');
-      return await electronAPI.seasons.simulateWeek(simWeekSeasonId, simWeek, weekOptions);
+      const weekOptions = options.body ? JSON.parse(options.body as string) : {};
+      if (!weekOptions.seasonId) throw new Error('Season ID required in request body');
+      return await electronAPI.seasons.simulateWeek(weekOptions.seasonId, weekOptions.week, weekOptions);
       
     case 'simulate-to-week':
-      const simToWeekSeasonId = pathParts[0];
-      const targetWeek = parseInt(pathParts[1] || params.get('targetWeek') || '1');
+      const simToWeekSeasonId = pathParts[0]; // Reverted: this is not used, data comes from POST body
+      const targetWeek = parseInt(pathParts[1] || params.get('targetWeek') || '1'); // Reverted: this is not used, data comes from POST body
       const toWeekOptions = options.body ? JSON.parse(options.body as string) : undefined;
-      if (!simToWeekSeasonId) throw new Error('Season ID required');
-      return await electronAPI.seasons.simulateToWeek(simToWeekSeasonId, targetWeek, toWeekOptions);
+      // For simulate-to-week, seasonId and targetWeek come from POST body, not URL
+      return await electronAPI.seasons.simulateToWeek(toWeekOptions?.seasonId || simToWeekSeasonId, toWeekOptions?.targetWeek || targetWeek, toWeekOptions);
       
     case 'simulate-season':
-      const simSeasonId = pathParts[0];
+      const simSeasonId = pathParts[1]; // Reverted: this is not used, data comes from POST body
       const seasonOptions = options.body ? JSON.parse(options.body as string) : undefined;
-      if (!simSeasonId) throw new Error('Season ID required');
-      return await electronAPI.seasons.simulateSeason(simSeasonId, seasonOptions);
+      // For simulate-season, seasonId comes from POST body, not URL
+      return await electronAPI.seasons.simulateSeason(seasonOptions?.seasonId || simSeasonId, seasonOptions);
       
     case 'playoff-bracket':
-      const playoffSeasonId = pathParts[0];
+      const playoffSeasonId = pathParts[1]; // Fixed: was pathParts[0]
       if (!playoffSeasonId) throw new Error('Season ID required');
       return await electronAPI.seasons.getPlayoffBracket(playoffSeasonId);
       
     case 'simulate-playoff-game':
-      const playoffGameId = pathParts[0] || params.get('gameId');
+      const playoffGameId = pathParts[1] || params.get('gameId'); // Fixed: was pathParts[0]
       const playoffOptions = options.body ? JSON.parse(options.body as string) : undefined;
       if (!playoffGameId) throw new Error('Game ID required');
       return await electronAPI.seasons.simulatePlayoffGame(playoffGameId, playoffOptions);
@@ -286,4 +289,32 @@ function createMockResponse(data: any, success: boolean = true): Response {
     url: '',
     redirected: false,
   } as Response;
+}
+
+// Debug functions for database inspection
+export async function debugTableCounts(): Promise<void> {
+  try {
+    const result = await (window as any).electronAPI.invoke('debug:tableCounts');
+    console.log('Debug table counts:', result);
+  } catch (error) {
+    console.error('Failed to get table counts:', error);
+  }
+}
+
+export async function debugSeasonGames(seasonId?: string): Promise<void> {
+  try {
+    const result = await (window as any).electronAPI.invoke('debug:seasonGames', seasonId);
+    console.log('Debug season games:', result);
+  } catch (error) {
+    console.error('Failed to get season games:', error);
+  }
+}
+
+export async function debugListAllSeasons(): Promise<void> {
+  try {
+    const result = await (window as any).electronAPI.invoke('seasons:getAll');
+    console.log('🏈 [DEBUG] All seasons in database:', result);
+  } catch (error) {
+    console.error('Failed to get all seasons:', error);
+  }
 }

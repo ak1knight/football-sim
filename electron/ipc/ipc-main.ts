@@ -1,11 +1,12 @@
-import { ipcMain } from 'electron';
+import { ipcMain, app } from 'electron';
 import { DAOManager } from '../database/dao/dao-manager';
+import { DatabaseManager } from '../database/database-manager';
 import { TeamService } from '../services/team-service';
 import { SeasonService } from '../services/season-service';
 import { SimulationService } from '../services/simulation-service';
 import { AppService } from '../services/app-service';
 
-export function setupIpcHandlers(daoManager: DAOManager): void {
+export function setupIpcHandlers(daoManager: DAOManager, databaseManager?: DatabaseManager): void {
   console.log('🔗 Setting up IPC handlers...');
 
   // Initialize services
@@ -126,6 +127,16 @@ export function setupIpcHandlers(daoManager: DAOManager): void {
     }
   });
 
+  ipcMain.handle('seasons:getGameDetails', async (event, gameId: string) => {
+    try {
+      const details = await seasonService.getGameDetails(gameId);
+      return { success: true, data: details };
+    } catch (error) {
+      console.error('seasons:getGameDetails error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
   ipcMain.handle('seasons:getTeamSchedule', async (event, seasonId: string, teamId: string) => {
     try {
       const schedule = await seasonService.getTeamSchedule(seasonId, teamId);
@@ -203,6 +214,56 @@ export function setupIpcHandlers(daoManager: DAOManager): void {
       return { success: true, data: result };
     } catch (error) {
       console.error('exhibition:simulate error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  // Game details handler
+  ipcMain.handle('games:getDetails', async (event, gameId: string) => {
+    try {
+      const game = daoManager.games.getById(gameId);
+      if (!game) {
+        throw new Error('Game not found');
+      }
+
+      const homeTeam = daoManager.teams.getById(game.home_team_id);
+      const awayTeam = daoManager.teams.getById(game.away_team_id);
+
+      if (!homeTeam || !awayTeam) {
+        throw new Error('Team not found');
+      }
+
+      const result = {
+        game_id: game.id,
+        home_team: {
+          id: homeTeam.id,
+          name: `${homeTeam.city} ${homeTeam.name}`,
+          city: homeTeam.city,
+          abbreviation: homeTeam.abbreviation,
+        },
+        away_team: {
+          id: awayTeam.id,
+          name: `${awayTeam.city} ${awayTeam.name}`,
+          city: awayTeam.city,
+          abbreviation: awayTeam.abbreviation,
+        },
+        home_score: game.home_score,
+        away_score: game.away_score,
+        weather: game.game_data?.weather,
+        detailed_stats: game.game_data?.stats,
+        drives: game.game_data?.drives,
+        play_by_play: game.game_data?.play_by_play,
+        key_plays: game.game_data?.play_by_play?.filter((play: any) => 
+          play.playType === 'turnover' || 
+          play.yardsGained >= 20 || 
+          play.yardsGained <= -10
+        ).slice(0, 20),
+        overtime: game.game_data?.detailed_stats?.overtime,
+      };
+
+      return { success: true, data: result };
+    } catch (error) {
+      console.error('games:getDetails error:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   });
@@ -322,6 +383,53 @@ export function setupIpcHandlers(daoManager: DAOManager): void {
       }
     });
   }
+
+  // Debug handlers for database inspection
+  ipcMain.handle('debug:tableCounts', async () => {
+    try {
+      if (databaseManager) {
+        databaseManager.debugTableCounts();
+        return { success: true, message: 'Table counts logged to console' };
+      } else {
+        return { success: false, error: 'Database manager not available' };
+      }
+    } catch (error) {
+      console.error('debug:tableCounts error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('debug:seasonGames', async (event, seasonId?: string) => {
+    try {
+      if (databaseManager) {
+        databaseManager.debugSeasonGames(seasonId);
+        return { success: true, message: 'Season games logged to console' };
+      } else {
+        return { success: false, error: 'Database manager not available' };
+      }
+    } catch (error) {
+      console.error('debug:seasonGames error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  // Debug: List all seasons
+  ipcMain.handle('debug:listSeasons', async () => {
+    try {
+      const seasons = daoManager.seasons.getAll();
+      console.log('🔍 [DEBUG] All seasons in database:', seasons);
+      return { success: true, data: seasons };
+    } catch (error) {
+      console.error('debug:listSeasons error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  // Application control handlers
+  ipcMain.on('quit-app', () => {
+    console.log('🛑 Quit request received from renderer');
+    app.quit();
+  });
 
   console.log('✅ IPC handlers registered successfully');
 }

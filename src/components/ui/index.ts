@@ -7,3 +7,5 @@ export { LoadingSpinner, LoadingMessage } from './LoadingSpinner';
 export { StatItem, StatComparison, StatGrid } from './StatDisplay';
 export { Table, SimpleTable } from './Table';
 export { GameCard } from './GameCard';
+export { Modal } from './Modal';
+export { Input } from './Input';

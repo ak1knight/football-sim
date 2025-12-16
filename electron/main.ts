@@ -10,6 +10,9 @@ class FootballSimApp {
   private dbManager: DatabaseManager | null = null;
   private daoManager: DAOManager | null = null;
   private autoUpdater: AutoUpdater | null = null;
+  private loadRetryCount: number = 0;
+  private maxLoadRetries: number = 3;
+  private retryDelay: number = 2000; // 2 seconds
 
   async initialize(): Promise<void> {
     console.log('🚀 Initializing Football Simulation Engine...');
@@ -52,7 +55,7 @@ class FootballSimApp {
       throw new Error('Database must be initialized before IPC setup');
     }
     
-    setupIpcHandlers(this.daoManager);
+    setupIpcHandlers(this.daoManager, this.dbManager || undefined);
     console.log('✅ IPC handlers registered');
   }
 
@@ -82,8 +85,7 @@ class FootballSimApp {
     } else {
       // Development: load from Vite dev server
       const devPort = process.env.VITE_DEV_SERVER_PORT || '5173';
-      this.mainWindow.loadURL(`http://localhost:${devPort}`);
-      this.mainWindow.webContents.openDevTools();
+      this.loadDevServer(devPort);
     }
 
     // Show window when ready
@@ -106,6 +108,154 @@ class FootballSimApp {
       }
       return { action: 'allow' };
     });
+
+    // Handle dev server connection errors
+    if (!app.isPackaged) {
+      this.setupDevServerErrorHandling();
+    }
+  }
+
+  private async loadDevServer(port: string): Promise<void> {
+    const url = `http://localhost:${port}`;
+    
+    try {
+      await this.mainWindow?.loadURL(url);
+      this.loadRetryCount = 0; // Reset on successful load
+      this.mainWindow?.webContents.openDevTools();
+    } catch (error) {
+      console.error(`❌ Failed to load dev server at ${url}:`, error);
+      this.handleDevServerError(port);
+    }
+  }
+
+  private setupDevServerErrorHandling(): void {
+    if (!this.mainWindow) return;
+
+    // Handle navigation errors (e.g., server not available)
+    this.mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+      // Ignore aborted loads (-3) as these are intentional cancellations
+      if (errorCode === -3) return;
+      
+      console.error(`❌ Failed to load page: ${errorDescription} (${errorCode})`);
+      console.error(`   URL: ${validatedURL}`);
+      
+      const port = process.env.VITE_DEV_SERVER_PORT || '5173';
+      this.handleDevServerError(port);
+    });
+
+    // Handle render process crashes
+    this.mainWindow.webContents.on('render-process-gone', (event, details) => {
+      console.error('❌ Renderer process crashed:', details);
+      
+      if (details.reason !== 'clean-exit') {
+        this.showErrorDialog('Renderer process crashed', 'The application will now close.');
+        app.quit();
+      }
+    });
+  }
+
+  private handleDevServerError(port: string): void {
+    if (this.loadRetryCount < this.maxLoadRetries) {
+      this.loadRetryCount++;
+      console.log(`🔄 Retrying dev server connection (${this.loadRetryCount}/${this.maxLoadRetries})...`);
+      
+      setTimeout(() => {
+        this.loadDevServer(port);
+      }, this.retryDelay);
+    } else {
+      console.error('❌ Max retries reached. Dev server appears to be down.');
+      this.showDevServerErrorPage();
+    }
+  }
+
+  private showDevServerErrorPage(): void {
+    if (!this.mainWindow) return;
+
+    const errorHtml = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>Dev Server Connection Error</title>
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              height: 100vh;
+              margin: 0;
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              color: white;
+            }
+            .container {
+              text-align: center;
+              max-width: 600px;
+              padding: 40px;
+              background: rgba(255, 255, 255, 0.1);
+              border-radius: 20px;
+              backdrop-filter: blur(10px);
+              box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            }
+            h1 {
+              font-size: 48px;
+              margin: 0 0 20px 0;
+            }
+            p {
+              font-size: 18px;
+              line-height: 1.6;
+              margin: 20px 0;
+            }
+            .error-icon {
+              font-size: 80px;
+              margin-bottom: 20px;
+            }
+            button {
+              background: white;
+              color: #667eea;
+              border: none;
+              padding: 12px 30px;
+              font-size: 16px;
+              font-weight: 600;
+              border-radius: 8px;
+              cursor: pointer;
+              margin: 10px;
+              transition: transform 0.2s, box-shadow 0.2s;
+            }
+            button:hover {
+              transform: translateY(-2px);
+              box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            }
+            .code {
+              background: rgba(0, 0, 0, 0.3);
+              padding: 10px 15px;
+              border-radius: 8px;
+              font-family: 'Courier New', monospace;
+              font-size: 14px;
+              margin: 20px 0;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="error-icon">⚠️</div>
+            <h1>Dev Server Not Available</h1>
+            <p>Unable to connect to the Vite development server.</p>
+            <div class="code">npm run dev:renderer</div>
+            <p>Please ensure the dev server is running on port ${process.env.VITE_DEV_SERVER_PORT || '5173'}, then click retry.</p>
+            <button onclick="window.location.reload()">🔄 Retry Connection</button>
+            <button onclick="require('electron').ipcRenderer.send('quit-app')">❌ Close Application</button>
+          </div>
+        </body>
+      </html>
+    `;
+
+    this.mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(errorHtml)}`);
+  }
+
+  private showErrorDialog(title: string, message: string): void {
+    const { dialog } = require('electron');
+    dialog.showErrorBox(title, message);
   }
 
   private setupAutoUpdater(): void {

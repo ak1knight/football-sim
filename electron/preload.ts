@@ -25,6 +25,7 @@ const electronAPI = {
       ipcRenderer.invoke('seasons:getNextGames', seasonId, limit),
     getWeekGames: (seasonId: string, week: number) =>
       ipcRenderer.invoke('seasons:getWeekGames', seasonId, week),
+    getGameDetails: (gameId: string) => ipcRenderer.invoke('seasons:getGameDetails', gameId),
     getTeamSchedule: (seasonId: string, teamId: string) =>
       ipcRenderer.invoke('seasons:getTeamSchedule', seasonId, teamId),
     simulateGame: (gameId: string, options?: any) => 
@@ -47,6 +48,9 @@ const electronAPI = {
       ipcRenderer.invoke('exhibition:simulate', homeTeamId, awayTeamId, options),
   },
 
+  // Game details API
+  getGameDetails: (gameId: string) => ipcRenderer.invoke('games:getDetails', gameId),
+
   // App utilities
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
@@ -58,12 +62,20 @@ const electronAPI = {
     restoreBackup: (backupName: string) => ipcRenderer.invoke('app:restoreBackup', backupName),
     listBackups: () => ipcRenderer.invoke('app:listBackups'),
     deleteBackup: (backupName: string) => ipcRenderer.invoke('app:deleteBackup', backupName),
+    quit: () => ipcRenderer.send('quit-app'),
   },
 
   // Development utilities
   dev: {
     openDevTools: () => ipcRenderer.invoke('dev:openDevTools'),
     reloadWindow: () => ipcRenderer.invoke('dev:reloadWindow'),
+  },
+
+  // Debug utilities
+  debug: {
+    listSeasons: () => ipcRenderer.invoke('debug:listSeasons'),
+    tableCounts: () => ipcRenderer.invoke('debug:tableCounts'),
+    seasonGames: (seasonId?: string) => ipcRenderer.invoke('debug:seasonGames', seasonId),
   }
 };
 

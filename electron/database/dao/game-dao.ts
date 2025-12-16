@@ -66,7 +66,27 @@ export class GameDAO extends BaseDAO<Game> {
 
   // Get games by week
   getWeekGames(seasonId: string, week: number): Game[] {
-    return this.findWhere('season_id = ? AND week = ?', [seasonId, week]);
+    console.log(`🏈 [DAO DEBUG] getWeekGames called with seasonId: "${seasonId}", week: ${week}`);
+    console.log(`🏈 [DAO DEBUG] seasonId length: ${seasonId.length}, type: ${typeof seasonId}`);
+    
+    const results = this.findWhere('season_id = ? AND week = ?', [seasonId, week]);
+    console.log(`🏈 [DAO DEBUG] Query returned ${results.length} games`);
+    
+    if (results.length === 0) {
+      // Let's debug by checking what season IDs actually exist
+      const allGames = this.db.prepare('SELECT DISTINCT season_id FROM season_games LIMIT 5').all();
+      console.log(`🏈 [DAO DEBUG] Sample season IDs in database:`, allGames);
+      
+      // Check if there are ANY games for this specific season
+      const seasonGameCount = this.db.prepare('SELECT COUNT(*) as count FROM season_games WHERE season_id = ?').get(seasonId);
+      console.log(`🏈 [DAO DEBUG] Total games for season "${seasonId}":`, seasonGameCount);
+      
+      // Check what weeks exist for this season
+      const weeks = this.db.prepare('SELECT DISTINCT week FROM season_games WHERE season_id = ? ORDER BY week').all(seasonId);
+      console.log(`🏈 [DAO DEBUG] Available weeks for season "${seasonId}":`, weeks);
+    }
+    
+    return results;
   }
 
   // Get next games (scheduled games)
@@ -221,12 +241,21 @@ export class GameDAO extends BaseDAO<Game> {
   createGames(games: Array<Omit<Game, 'id'>>): number {
     if (games.length === 0) return 0;
 
+    console.log(`🏈 [DAO CREATE] Creating ${games.length} games`);
+    console.log(`🏈 [DAO CREATE] First game season_id: "${games[0].season_id}"`);
+    console.log(`🏈 [DAO CREATE] Sample game:`, games[0]);
+
     return this.transaction(() => {
       let created = 0;
       for (const game of games) {
-        this.create(game);
+        const gameId = this.create(game);
+        if (created === 0) {
+          console.log(`🏈 [DAO CREATE] First game created with ID: "${gameId}"`);
+          console.log(`🏈 [DAO CREATE] First game season_id was: "${game.season_id}"`);
+        }
         created++;
       }
+      console.log(`🏈 [DAO CREATE] Successfully created ${created} games`);
       return created;
     });
   }

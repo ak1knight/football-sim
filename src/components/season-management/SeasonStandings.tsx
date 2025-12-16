@@ -2,6 +2,12 @@ import React, { useEffect, useContext } from 'react';
 import { observer } from 'mobx-react-lite';
 import { StoresContext } from '../../stores';
 
+const formatPercentage = new Intl.NumberFormat('en-US', {
+  style: 'percent',
+  minimumFractionDigits: 0, // Optional: minimum number of decimal places
+  maximumFractionDigits: 2, // Optional: maximum number of decimal places
+})
+
 const SeasonStandings: React.FC = observer(() => {
 	const { seasonStore } = useContext(StoresContext);
 	const { standings, standingsByDivision, loading, error } = seasonStore;
@@ -30,9 +36,10 @@ const SeasonStandings: React.FC = observer(() => {
 			</div>
 			{Object.keys(standings).length > 0 ? (
 				<div className="space-y-6">
-					{Object.entries(standings).map(([divisionOrConf, teams]) => (
-						<div key={divisionOrConf} className="card p-6">
-							<h3 className="text-lg font-semibold text-white mb-4">{divisionOrConf}</h3>
+					{Object.entries(standings).map(([conference, divisions]) => 
+						Object.entries(divisions).map(([division, teams]) => (
+						<div key={`${conference}-${division}`} className="card p-6">
+							<h3 className="text-lg font-semibold text-white mb-4">{conference} - {division}</h3>
 							<div className="overflow-x-auto">
 								<table className="w-full text-sm">
 									<thead>
@@ -50,7 +57,7 @@ const SeasonStandings: React.FC = observer(() => {
 										</tr>
 									</thead>
 									<tbody>
-										{teams.map((team, index) => (
+										{teams && Array.isArray(teams) && teams.length > 0 ? teams.map((team, index) => (
 											<tr key={team.team.abbreviation} className="border-b border-secondary-700/50">
 												<td className="py-2">
 													<div className="flex items-center">
@@ -62,10 +69,10 @@ const SeasonStandings: React.FC = observer(() => {
 														</span>
 													</div>
 												</td>
-												<td className="text-center py-2 text-white font-medium">{team.wins}</td>
-												<td className="text-center py-2 text-white font-medium">{team.losses}</td>
-												<td className="text-center py-2 text-white font-medium">{team.ties}</td>
-												<td className="text-center py-2 text-white font-medium">{team.win_percentage}</td>
+												<td className="text-center py-2 text-white font-medium">{team.record.wins}</td>
+												<td className="text-center py-2 text-white font-medium">{team.record.losses}</td>
+												<td className="text-center py-2 text-white font-medium">{team.record.ties}</td>
+												<td className="text-center py-2 text-white font-medium">{formatPercentage.format(team.win_percentage)}</td>
 												<td className="text-center py-2 text-secondary-300">{team.points_for}</td>
 												<td className="text-center py-2 text-secondary-300">{team.points_against}</td>
 												<td className={`text-center py-2 font-medium ${
@@ -80,12 +87,18 @@ const SeasonStandings: React.FC = observer(() => {
 												<td className="text-center py-2 text-secondary-300">{team.division_record}</td>
 												<td className="text-center py-2 text-secondary-300">{team.conference_record}</td>
 											</tr>
-										))}
+										)) : (
+											<tr>
+												<td colSpan={10} className="text-center py-4 text-secondary-400">
+													No team data available for this division
+												</td>
+											</tr>
+										)}
 									</tbody>
 								</table>
 							</div>
 						</div>
-					))}
+						)))}
 				</div>
 			) : (
 				<div className="card p-8 text-center">

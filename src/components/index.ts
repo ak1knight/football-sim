@@ -4,6 +4,7 @@ export { Layout } from './Layout';
 export { Sidebar } from './Sidebar';
 export { Header } from './Header';
 export { ExhibitionGame } from './ExhibitionGame';
+export { GameDetailsModal } from './GameDetailsModal';
 export { SeasonManagement };
 export { TeamManagement } from './TeamManagement';
 export { LeagueManagement } from './LeagueManagement';

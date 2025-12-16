@@ -1,7 +1,8 @@
-import React, { useEffect, useContext } from 'react';
+import React, { useEffect, useContext, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { StoresContext } from '../../stores';
 import { Button, Card } from '../ui';
+import { GameDetailsModal } from '../GameDetailsModal';
 
 const SeasonSchedule: React.FC = observer(() => {
 	const { seasonStore } = useContext(StoresContext);
@@ -9,6 +10,18 @@ const SeasonSchedule: React.FC = observer(() => {
 		currentSeason, currentWeekGames, selectedWeek,
 		loading, error, scheduledGamesCount
 	} = seasonStore;
+	const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
+	const [isModalOpen, setIsModalOpen] = useState(false);
+
+	const handleViewGameDetails = (gameId: string) => {
+		setSelectedGameId(gameId);
+		setIsModalOpen(true);
+	};
+
+	const handleCloseModal = () => {
+		setIsModalOpen(false);
+		setSelectedGameId(null);
+	};
 
 	useEffect(() => {
 		if (currentSeason) {
@@ -165,16 +178,25 @@ const SeasonSchedule: React.FC = observer(() => {
 								</div>
 								<div className="flex items-center space-x-3">
 									{game.status === 'completed' ? (
-										<div className="text-center">
-											<span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-green-900 text-green-300">
-												Final{game.overtime && ' (OT)'}
-											</span>
-											{game.winner && (
-												<p className="text-xs text-secondary-400 mt-1">
-													Winner: {game.winner}
-												</p>
-											)}
-										</div>
+										<>
+											<Button
+												variant="secondary"
+												size="sm"
+												onClick={() => handleViewGameDetails(game.game_id)}
+											>
+												View Details
+											</Button>
+											<div className="text-center">
+												<span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-green-900 text-green-300">
+													Final{game.overtime && ' (OT)'}
+												</span>
+												{game.winner && (
+													<p className="text-xs text-secondary-400 mt-1">
+														Winner: {game.winner}
+													</p>
+												)}
+											</div>
+										</>
 									) : (
 										<button
 											onClick={() => handleSimulateGame(game.game_id)}
@@ -196,6 +218,15 @@ const SeasonSchedule: React.FC = observer(() => {
 				<div className="bg-red-900/50 border border-red-500 rounded-lg p-4">
 					<p className="text-red-200">{error}</p>
 				</div>
+			)}
+
+			{/* Game Details Modal */}
+			{selectedGameId && (
+				<GameDetailsModal
+					gameId={selectedGameId}
+					isOpen={isModalOpen}
+					onClose={handleCloseModal}
+				/>
 			)}
 		</div>
 	);

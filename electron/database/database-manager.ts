@@ -184,7 +184,7 @@ export class DatabaseManager {
               id TEXT PRIMARY KEY,
               name TEXT NOT NULL,
               year INTEGER NOT NULL,
-              status TEXT DEFAULT 'setup' CHECK (status IN ('setup', 'active', 'completed')),
+              status TEXT DEFAULT 'setup' CHECK (status IN ('setup', 'active', 'playoffs', 'completed')),
               current_week INTEGER DEFAULT 1,
               created_at TEXT DEFAULT (datetime('now')),
               updated_at TEXT DEFAULT (datetime('now'))
@@ -393,6 +393,72 @@ export class DatabaseManager {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       throw new DatabaseError(`Backup failed: ${errorMessage}`, error instanceof Error ? error : undefined);
+    }
+  }
+
+  // Debug methods for inspecting database contents
+  debugTableCounts(): void {
+    if (!this.db) {
+      console.log('❌ Database not initialized');
+      return;
+    }
+
+    console.log('📊 Database Table Counts:');
+    const tables = ['seasons', 'games', 'teams', 'users'];
+    
+    for (const table of tables) {
+      try {
+        const result = this.db.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as { count: number };
+        console.log(`  ${table}: ${result.count} records`);
+      } catch (error) {
+        console.log(`  ${table}: table not found or error`);
+      }
+    }
+  }
+
+  debugSeasonGames(seasonId?: string): void {
+    if (!this.db) {
+      console.log('❌ Database not initialized');
+      return;
+    }
+
+    if (seasonId) {
+      console.log(`🏈 Games for Season ${seasonId}:`);
+      try {
+        const games = this.db.prepare(`
+          SELECT game_id, week, home_team, away_team, game_status 
+          FROM games 
+          WHERE season_id = ? 
+          ORDER BY week, game_id
+        `).all(seasonId);
+        
+        if (games.length === 0) {
+          console.log('  No games found for this season');
+        } else {
+          games.forEach((game: any) => {
+            console.log(`  Week ${game.week}: ${game.away_team} @ ${game.home_team} (${game.game_status})`);
+          });
+        }
+      } catch (error) {
+        console.log('  Error querying games:', error);
+      }
+    } else {
+      console.log('🏈 All Seasons with Game Counts:');
+      try {
+        const seasonCounts = this.db.prepare(`
+          SELECT s.season_id, s.season_name, COUNT(g.game_id) as game_count
+          FROM seasons s
+          LEFT JOIN games g ON s.season_id = g.season_id
+          GROUP BY s.season_id, s.season_name
+          ORDER BY s.season_name
+        `).all();
+        
+        seasonCounts.forEach((season: any) => {
+          console.log(`  ${season.season_name} (${season.season_id}): ${season.game_count} games`);
+        });
+      } catch (error) {
+        console.log('  Error querying season game counts:', error);
+      }
     }
   }
 }

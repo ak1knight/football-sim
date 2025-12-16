@@ -10,7 +10,7 @@ import {
 } from './weather';
 
 type PlayType = 'run' | 'pass' | 'turnover' | 'special';
-type DriveResultType = 'touchdown' | 'field_goal' | 'turnover' | 'punt' | 'missed_fg' | 'end_of_quarter';
+type DriveResultType = 'touchdown' | 'field_goal' | 'turnover' | 'turnover_on_downs' | 'punt' | 'missed_fg' | 'end_of_quarter';
 
 export interface PlayLogEntry {
   quarter: number;
@@ -34,6 +34,7 @@ export interface DriveLog {
   timeElapsed: number;
   plays: number;
   playLog: PlayLogEntry[];
+  finalPlayDescription?: string;
 }
 
 export interface TeamSimulationStats {
@@ -272,6 +273,37 @@ export class GameEngine {
       }
 
       playByPlay.push(...driveOutcome.playLog);
+      
+      // Generate final play description for scoring/turnover drives
+      let finalPlayDescription: string | undefined;
+      if (driveOutcome.playLog.length > 0) {
+        const finalPlay = driveOutcome.playLog[driveOutcome.playLog.length - 1];
+        if (driveOutcome.result === 'touchdown') {
+          const playTypeStr = finalPlay.playType === 'run' ? 'rush' : finalPlay.playType === 'pass' ? 'pass' : 'play';
+          finalPlayDescription = `${finalPlay.yardsGained} yd ${playTypeStr}`;
+        } else if (driveOutcome.result === 'field_goal') {
+          const fgDistance = (100 - driveOutcome.finalFieldPosition) + 17;
+          finalPlayDescription = `${fgDistance} yd FG`;
+        } else if (driveOutcome.result === 'missed_fg') {
+          const fgDistance = (100 - driveOutcome.finalFieldPosition) + 17;
+          finalPlayDescription = `Missed ${fgDistance} yd FG`;
+        } else if (driveOutcome.result === 'turnover') {
+          if (finalPlay.playType === 'turnover') {
+            finalPlayDescription = 'Turnover';
+          } else {
+            finalPlayDescription = `Turnover on ${finalPlay.playType}`;
+          }
+        } else if (driveOutcome.result === 'turnover_on_downs') {
+          finalPlayDescription = `Failed on 4th & ${finalPlay.yardsToGo}`;
+        }
+      } else if (driveOutcome.result === 'field_goal' || driveOutcome.result === 'missed_fg') {
+        // FG/missed FG with no plays (decided before play)
+        const fgDistance = (100 - driveOutcome.finalFieldPosition) + 17;
+        finalPlayDescription = driveOutcome.result === 'field_goal' 
+          ? `${fgDistance} yd FG` 
+          : `Missed ${fgDistance} yd FG`;
+      }
+      
       drives.push({
         quarter,
         driveNumber: drivesInQuarter,
@@ -283,6 +315,7 @@ export class GameEngine {
         timeElapsed: driveOutcome.timeElapsed,
         plays: driveOutcome.plays,
         playLog: driveOutcome.playLog,
+        finalPlayDescription,
       });
 
       if (timeRemaining <= 0) {
@@ -484,6 +517,67 @@ export class GameEngine {
     return this.rng() < successProb;
   }
 
+  private decideFourthDown(
+    offense: Team,
+    fieldPosition: number,
+    yardsToGo: number,
+    isHome: boolean,
+    quarter: number,
+    timeRemaining: number
+  ): 'punt' | 'field_goal' | 'go_for_it' {
+    const yardsToGoal = 100 - fieldPosition;
+    const fgDistance = yardsToGoal + 17;
+    
+    // Short yardage situations (1-2 yards) - more likely to go for it
+    if (yardsToGo <= 2) {
+      // In opponent territory or desperate situations
+      if (fieldPosition >= 50 || quarter >= 4) {
+        return 'go_for_it';
+      }
+      // Otherwise random chance to go for it
+      if (this.rng() < 0.3) {
+        return 'go_for_it';
+      }
+    }
+    
+    // Field goal range (roughly < 53 yards, field position >= 47)
+    if (fieldPosition >= 47 && fgDistance <= 53) {
+      // Late in game when points matter, more likely to kick
+      if (quarter === 4 && timeRemaining < 300) {
+        return 'field_goal';
+      }
+      // Otherwise kick if it's a reasonable distance
+      if (fgDistance <= 45) {
+        return 'field_goal';
+      }
+      // Longer FGs - sometimes go for it instead
+      if (yardsToGo <= 5 && this.rng() < 0.4) {
+        return 'go_for_it';
+      }
+      return 'field_goal';
+    }
+    
+    // Desperate situations - go for it more often
+    if (quarter === 4 && timeRemaining < 120) {
+      // Near midfield or better
+      if (fieldPosition >= 45) {
+        return 'go_for_it';
+      }
+    }
+    
+    // Deep in own territory - always punt
+    if (fieldPosition < 35) {
+      return 'punt';
+    }
+    
+    // Midfield area (35-47) - mostly punt, sometimes go for it
+    if (yardsToGo <= 3 && this.rng() < 0.2) {
+      return 'go_for_it';
+    }
+    
+    return 'punt';
+  }
+
   private simulateKickoff(kickingTeam: Team, receivingTeam: Team): number {
     const baseReturn = 25;
     const kickingStrength = (kickingTeam.stats.special_teams_rating || 70) / 100;
@@ -507,6 +601,9 @@ export class GameEngine {
     if (drive.result === 'touchdown' || drive.result === 'field_goal') {
       fieldPosition = this.simulateKickoff(offense, defense);
     } else if (drive.result === 'turnover') {
+      fieldPosition = 100 - drive.finalFieldPosition;
+    } else if (drive.result === 'turnover_on_downs') {
+      // Failed 4th down conversion - other team gets ball at spot
       fieldPosition = 100 - drive.finalFieldPosition;
     } else if (drive.result === 'punt') {
       fieldPosition = this.simulatePunt(offense, defense, drive.finalFieldPosition);
@@ -562,6 +659,41 @@ export class GameEngine {
     let clock = timeRemaining;
 
     while (playsInDrive < maxPlays && driveTimeElapsed < timeRemaining) {
+      // BEFORE the play, check if this is 4th down and make punt/FG/go-for-it decision
+      if (down === 4) {
+        const fourthDownDecision = this.decideFourthDown(
+          offense,
+          currentFieldPosition,
+          yardsForFirstDown,
+          isHome,
+          quarter,
+          timeRemaining
+        );
+
+        if (fourthDownDecision === 'punt') {
+          // Execute punt
+          result = 'punt';
+          points = 0;
+          break;
+        } else if (fourthDownDecision === 'field_goal') {
+          // Attempt field goal
+          const fgSuccess = this.attemptFieldGoal(offense, 100 - currentFieldPosition, isHome);
+          driveTimeElapsed += 5; // FG attempt takes ~5 seconds
+          clock = Math.max(0, clock - 5);
+          
+          if (fgSuccess) {
+            result = 'field_goal';
+            points = 3;
+          } else {
+            result = 'missed_fg';
+            points = 0;
+          }
+          break;
+        }
+        // Otherwise, go for it on 4th down (continue with normal play)
+        agg.fourthDown.attempts += 1;
+      }
+
       playsInDrive += 1;
       const playResult = this.simulatePlayWithTime(offense, defense, isHome, down, yardsForFirstDown, currentFieldPosition);
       driveTimeElapsed += playResult.timeElapsed;
@@ -597,7 +729,6 @@ export class GameEngine {
       }
 
       if (startingDown === 3) agg.thirdDown.attempts += 1;
-      if (startingDown === 4) agg.fourthDown.attempts += 1;
 
       if (currentFieldPosition >= 100) {
         if (playResult.playType === 'turnover') {
@@ -628,25 +759,16 @@ export class GameEngine {
       }
 
       down += 1;
+      
+      // If we failed on 4th down, it's a turnover on downs
       if (down > 4) {
-        if (currentFieldPosition >= 55) {
-          const fgSuccess = this.attemptFieldGoal(offense, 100 - currentFieldPosition, isHome);
-          if (fgSuccess) {
-            result = 'field_goal';
-            points = 3;
-          } else {
-            result = 'missed_fg';
-            points = 0;
-          }
-        } else {
-          result = 'punt';
-          points = 0;
-        }
+        result = 'turnover_on_downs';
+        points = 0;
         break;
       }
 
       if (driveTimeElapsed >= timeRemaining) {
-        result = down > 4 ? 'punt' : 'end_of_quarter';
+        result = 'end_of_quarter';
         points = 0;
         break;
       }

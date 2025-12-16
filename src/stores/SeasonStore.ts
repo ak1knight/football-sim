@@ -47,9 +47,11 @@ export interface TeamRecord {
     conference: string;
     division: string;
   };
-  wins: number;
-  losses: number;
-  ties: number;
+  record: {
+    wins: number;
+    losses: number;
+    ties: number;
+  };
   win_percentage: number;
   points_for: number;
   points_against: number;
@@ -61,7 +63,8 @@ export interface TeamRecord {
 
 export interface SeasonStatus {
   id: string;
-  season_year: number;
+  year: number;
+  name: string;
   current_week: number;
   current_phase: string;
   total_games: number;
@@ -73,7 +76,7 @@ export interface SeasonStatus {
 }
 
 export interface Standings {
-  [divisionOrConference: string]: TeamRecord[];
+  [conference: string]: { [division: string]: TeamRecord[] };
 }
 
 export interface SimulationResult {
@@ -148,7 +151,7 @@ export class SeasonStore {
   // Season state
   currentSeason: SeasonStatus | null = null;
   allSeasons: SeasonStatus[] = [];
-  selectedSeasonId: string | null = null;
+  selectedSeasonId: string | undefined = undefined;
   teams: Team[] = [];
   organizedTeams: OrganizedTeams = {};
   
@@ -179,9 +182,43 @@ export class SeasonStore {
 
   constructor() {
     makeAutoObservable(this);
+    // Load teams on initialization
+    this.loadTeams();
   }
 
-  setSelectedSeason(id: string | null) {
+  async loadTeams() {
+    try {
+      const response = await apiFetch('/api/teams/all', {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const result = await response.json();
+      if (result.success && result.data) {
+        runInAction(() => {
+          this.teams = result.data;
+          this.organizeTeams();
+        });
+      }
+    } catch (error) {
+      console.error('Failed to load teams:', error);
+    }
+  }
+
+  organizeTeams() {
+    const organized: OrganizedTeams = {};
+    this.teams.forEach(team => {
+      if (!organized[team.conference]) {
+        organized[team.conference] = {};
+      }
+      if (!organized[team.conference][team.division]) {
+        organized[team.conference][team.division] = [];
+      }
+      organized[team.conference][team.division].push(team);
+    });
+    this.organizedTeams = organized;
+  }
+
+  setSelectedSeason(id: string | undefined) {
     this.selectedSeasonId = id;
     // Update currentSeason to match selected
     if (id) {
@@ -201,8 +238,8 @@ export class SeasonStore {
       const result = await response.json();
       if (result.success) {
         runInAction(() => {
-          console.log('Fetched seasons:', result.seasons);
-          this.allSeasons = result.seasons || [];
+          console.log('Fetched seasons:', result.data);
+          this.allSeasons = result.data || [];
           // If no selectedSeasonId, pick most recent
           if (!this.selectedSeasonId && this.allSeasons.length > 0) {
             this.selectedSeasonId = this.allSeasons[0].id;
@@ -245,9 +282,9 @@ export class SeasonStore {
       const response = await apiFetch('/api/seasons/create', {
         method: 'POST',
         body: JSON.stringify({
-          season_year: seasonYear,
+          year: seasonYear,
           seed,
-          season_name: seasonName || `NFL ${seasonYear} Season`
+          name: seasonName || `NFL ${seasonYear} Season`
         })
       });
 
@@ -257,13 +294,16 @@ export class SeasonStore {
         runInAction(() => {
           this.currentSeason = result.data.seasonId ? { 
             id: result.data.seasonId,
-            season_year: seasonYear,
-            season_name: seasonName || `NFL ${seasonYear} Season`,
+            year: seasonYear,
+            name: seasonName || `NFL ${seasonYear} Season`,
             current_week: 1,
             current_phase: 'regular_season',
             completed_games: 0,
             total_games: 272, // 32 teams * 17 games / 2
-            completion_percentage: 0
+            completion_percentage: 0,
+            next_games_count: 0,
+            weeks_remaining: 17,
+            schedule_type: 'balanced'
           } : null;
           this.selectedSeasonId = result.data.seasonId;
         });
@@ -275,6 +315,8 @@ export class SeasonStore {
         if (result.data.seasonId) {
           await this.loadSeasonStatus(result.data.seasonId);
           await this.loadNextGames();
+          await this.loadWeekGames(1); // Load games for week 1
+          await this.fetchAllSeasons();
         }
 
         return result;
@@ -294,48 +336,45 @@ export class SeasonStore {
     try {
 // Debug: Log user and season info before status request
       const id = seasonId || this.selectedSeasonId;
+      
+      // If no season ID is available, skip the request
+      if (!id) {
+        console.log('🏈 [DEBUG] No season ID available, skipping season status load');
+        return { success: false, error: 'No season ID provided' };
+      }
+      
+      console.log(`🏈 [DEBUG] loadSeasonStatus called with ID: "${id}"`);
+      console.log(`🏈 [DEBUG] selectedSeasonId: "${this.selectedSeasonId}"`);
+      console.log(`🏈 [DEBUG] currentSeason?.id: "${this.currentSeason?.id}"`);
+      
       const paramsObj: Record<string, string> = {};
       if (id) paramsObj.season_id = id;
       const params = new URLSearchParams(paramsObj);
-      const response = await apiFetch(`/api/seasons/status/${seasonId}`, {
+      const response = await apiFetch(`/api/seasons/status/${id}`, {
         method: 'GET'
       });
       const result = await response.json();
       
+      console.log(`🏈 [DEBUG] Season status response:`, result);
+      
       if (result.success) {
-        console.log('Season status loaded:', result);
+        console.log('🏈 [DEBUG] Season status loaded successfully, updating current season');
         runInAction(() => {
-          this.currentSeason = result.season;
+          this.currentSeason = result.data;
+          this.selectedSeasonId = id; // Ensure this is set correctly
         });
+      } else {
+        console.error('❌ [DEBUG] Failed to load season status:', result.error || result.message);
       }
       
       return result;
     } catch (error) {
-      console.error('Error loading season status:', error);
+      console.error('❌ [DEBUG] Error loading season status:', error);
       return { success: false, error: `Network error: ${error}` };
     }
   }
 
-  // No /api/season/teams endpoint in backend; consider removing or replacing this method.
-  async loadTeams() {
-    try {
-      const response = await apiFetch('/api/teams/all');
-      const result = await response.json();
-      
-      if (result.success && result.data) {
-        runInAction(() => {
-          this.teams = result.data;
-        });
-        return { success: true };
-      } else {
-        this.setError(result.error || 'Failed to load teams');
-        return { success: false, error: result.error || 'Failed to load teams' };
-      }
-    } catch (error) {
-      this.setError(`Network error: ${error}`);
-      return { success: false, error: `Network error: ${error}` };
-    }
-  }
+  // Removed duplicate loadTeams method - using the first implementation above
 
   async loadNextGames(limit: number = 16) {
     try {
@@ -351,7 +390,7 @@ export class SeasonStore {
       
       if (result.success) {
         runInAction(() => {
-          this.nextGames = result.games;
+          this.nextGames = result.data;
         });
       }
       
@@ -366,20 +405,31 @@ export class SeasonStore {
     try {
       const seasonId = this.selectedSeasonId || this.currentSeason?.id;
       if (!seasonId) {
+        console.log('No season ID available for loading week games');
         return { success: false, error: 'No current season ID' };
       }
-      const params = new URLSearchParams({ season_id: seasonId, user_id: DEFAULT_USER_ID });
-      const response = await apiFetch(`/api/seasons/week-games/${this.selectedSeasonId}/${week}`, {
+      
+      console.log(`🏈 [DEBUG] Loading week ${week} games for season ID: "${seasonId}"`);
+      console.log(`🏈 [DEBUG] Season ID length: ${seasonId.length}, type: ${typeof seasonId}`);
+      
+      const response = await apiFetch(`/api/seasons/week-games/${seasonId}/${week}`, {
         method: 'GET',
       });
       const result = await response.json();
       
+      console.log(`🏈 [DEBUG] Week games API response:`, result);
+      
       if (result.success) {
-        console.log('Week games loaded successfully:', result.games);
+        console.log(`🏈 [DEBUG] Week games loaded successfully! Games count: ${result.data?.length || 0}`);
+        if (result.data && result.data.length > 0) {
+          console.log(`🏈 [DEBUG] First game:`, result.data[0]);
+        }
         runInAction(() => {
-          this.currentWeekGames = result.games;
+          this.currentWeekGames = result.data;
           this.selectedWeek = week;
         });
+      } else {
+        console.error('❌ [DEBUG] Failed to load week games:', result.error || result.message);
       }
       
       return result;
@@ -393,24 +443,35 @@ export class SeasonStore {
     try {
       const seasonId = this.selectedSeasonId || this.currentSeason?.id;
       if (!seasonId) {
+        console.log('No season ID available for loading standings');
         return { success: false, error: 'No current season ID' };
       }
-      const params = new URLSearchParams({ season_id: seasonId, user_id: DEFAULT_USER_ID, by_division: String(byDivision) });
-      const response = await apiFetch(`/api/seasons/standings/${this.selectedSeasonId}`, {
+      
+      console.log(`Loading standings for season ${seasonId}, byDivision: ${byDivision}`);
+      const response = await apiFetch(`/api/seasons/standings/${seasonId}`, {
         method: 'GET',
       });
       const result = await response.json();
       
       if (result.success) {
+        console.log('Standings loaded successfully:', result.data);
         runInAction(() => {
-          this.standings = result.standings;
+          this.standings = result.data.standings || {};
           this.standingsByDivision = byDivision;
+        });
+      } else {
+        console.error('Failed to load standings:', result.error || result.message);
+        runInAction(() => {
+          this.standings = {};
         });
       }
       
       return result;
     } catch (error) {
       console.error('Error loading standings:', error);
+      runInAction(() => {
+        this.standings = {};
+      });
       return { success: false, error: `Network error: ${error}` };
     }
   }
@@ -431,10 +492,12 @@ export class SeasonStore {
       
       if (result.success) {
         runInAction(() => {
-          this.currentSeason = result.season;
-          this.lastSimulationMessage = result.message;
-          if (result.simulation_details) {
-            this.simulationResults.unshift(result.simulation_details);
+          if (result.data.season_status) {
+            this.currentSeason = result.data.season_status;
+          }
+          this.lastSimulationMessage = result.data.message || 'Game simulated successfully';
+          if (result.data.simulation_details) {
+            this.simulationResults.unshift(result.data.simulation_details);
           }
         });
         
@@ -456,30 +519,44 @@ export class SeasonStore {
   }
 
   async simulateWeek(week?: number, seed?: number) {
+    if (!this.selectedSeasonId) {
+      console.error('No season selected for simulation');
+      return { success: false, error: 'No season selected' };
+    }
+    
     this.setLoading(true);
     this.setError(null);
-    
+
+    console.log(`Simulating week ${week} for season ID: "${this.selectedSeasonId}"`);    
     try {
       const response = await apiFetch('/api/seasons/simulate-week', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ week, seed })
+        body: JSON.stringify({ 
+          seasonId: this.selectedSeasonId || this.currentSeason?.id, // Added missing seasonId
+          week, 
+          seed 
+        })
       });
       
       const result = await response.json();
       
       if (result.success) {
         runInAction(() => {
-          this.currentSeason = result.season;
-          this.lastSimulationMessage = result.message;
-          this.simulationResults.unshift(...result.simulated_games);
+          if (result.data.season_status) {
+            this.currentSeason = result.data.season_status;
+          }
+          this.lastSimulationMessage = result.data.message || 'Week simulated successfully';
+          if (result.data.simulated_games) {
+            this.simulationResults.unshift(...result.data.simulated_games);
+          }
         });
         
-        // Refresh all relevant data after week simulation
+        // Refresh all relevant data after simulation
         await Promise.all([
           this.loadNextGames(),
           this.loadStandings(this.standingsByDivision),
-          this.loadSeasonStatus() // Force refresh season status
+          this.loadSeasonStatus(this.selectedSeasonId) // Force refresh season status
         ]);
         
         // If we're viewing the current week, reload it to show updated status
@@ -508,23 +585,27 @@ export class SeasonStore {
       const response = await apiFetch('/api/seasons/simulate-to-week', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target_week: targetWeek, seed })
+        body: JSON.stringify({seasonId: this.selectedSeasonId || this.currentSeason?.id, targetWeek: targetWeek, seed })
       });
       
       const result = await response.json();
       
       if (result.success) {
         runInAction(() => {
-          this.currentSeason = result.season;
-          this.lastSimulationMessage = result.message;
-          this.simulationResults.unshift(...result.simulated_games);
+          if (result.data.season_status) {
+            this.currentSeason = result.data.season_status;
+          }
+          this.lastSimulationMessage = result.data.message || 'Simulation to week completed';
+          if (result.data.simulated_games) {
+            this.simulationResults.unshift(...result.data.simulated_games);
+          }
         });
         
         // Refresh all relevant data after multi-week simulation
         await Promise.all([
           this.loadNextGames(),
           this.loadStandings(this.standingsByDivision),
-          this.loadSeasonStatus() // Force refresh season status
+          this.loadSeasonStatus(this.selectedSeasonId) // Force refresh season status
         ]);
         
         // If we're viewing the current week, reload it to show updated status
@@ -560,16 +641,20 @@ export class SeasonStore {
       
       if (result.success) {
         runInAction(() => {
-          this.currentSeason = result.season;
-          this.lastSimulationMessage = result.message;
-          this.simulationResults.unshift(...result.simulated_games);
+          if (result.data.season_status) {
+            this.currentSeason = result.data.season_status;
+          }
+          this.lastSimulationMessage = result.data.message || 'Full season simulated successfully';
+          if (result.data.simulated_games) {
+            this.simulationResults.unshift(...result.data.simulated_games);
+          }
         });
         
         // Refresh all relevant data after full season simulation
         await Promise.all([
           this.loadNextGames(),
           this.loadStandings(this.standingsByDivision),
-          this.loadSeasonStatus() // Force refresh season status
+          this.loadSeasonStatus(this.selectedSeasonId) // Force refresh season status
         ]);
         
         // If we're viewing the current week, reload it to show updated status
@@ -595,10 +680,12 @@ export class SeasonStore {
     try {
       const response = await apiFetch(`/api/seasons/playoff-bracket/${this.selectedSeasonId}`);
       const result = await response.json();
+
+      console.log('Playoff bracket response:', result);
       
       if (result.success) {
         runInAction(() => {
-          this.playoffBracket = result.bracket;
+          this.playoffBracket = result.data.bracket;
         });
       }
       
@@ -613,10 +700,13 @@ export class SeasonStore {
     try {
       const response = await apiFetch(`/api/seasons/next-games/${this.selectedSeasonId}`);
       const result = await response.json();
+
+      console.log('Next playoff games response:', result);
       
       if (result.success) {
         runInAction(() => {
-          this.nextPlayoffGames = result.games;
+          console.log('Updating nextPlayoffGames with data:', result.data);
+          this.nextPlayoffGames = result.data;
         });
       }
       
@@ -654,7 +744,7 @@ export class SeasonStore {
         // Refresh playoff data
         await Promise.all([
           this.loadNextPlayoffGames(),
-          this.loadSeasonStatus()
+          this.loadSeasonStatus(this.selectedSeasonId)
         ]);
         
         return result;

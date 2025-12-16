@@ -1,28 +1,38 @@
-import React, { useState, useContext } from 'react';
+import React, { useContext } from 'react';
 import { observer } from 'mobx-react-lite';
-import { Input } from '../ui/Input';
 import { StoresContext } from '../../stores';
 import { ErrorMessage, Button } from '../ui';
 
 const SeasonSetup: React.FC = observer(() => {
 	const { appStore, seasonStore } = useContext(StoresContext);
-	const [seasonName, setSeasonName] = useState(`NFL 2024 Season`);
-	const { currentSeason, loading, error, teams, organizedTeams, isSeasonComplete } = seasonStore;
+	const { currentSeason, loading, error, organizedTeams, isSeasonComplete } = seasonStore;
 
 	const handleCreateSeason = async () => {
-		const result = await seasonStore.createSeason(2024, undefined, seasonName);
+		const result = await seasonStore.createSeason(2024, undefined, `NFL 2024 Season`);
 		if (result.success) {
 			appStore.setCurrentTab('Schedule');
 		}
 	};
 
 	const handleStartNewSeason = async () => {
-		const newYear = currentSeason ? currentSeason.season_year + 1 : new Date().getFullYear();
+		const newYear = currentSeason ? currentSeason.year + 1 : new Date().getFullYear();
 		const result = await seasonStore.startNewSeason(newYear);
 		if (result.success) {
 			appStore.setCurrentTab('Setup');
 		}
 	};
+
+	const handleDebugSeasons = async () => {
+		try {
+			const result = await window.electronAPI.debug.listSeasons();
+			console.log('🔍 [DEBUG] All seasons from debug call:', result);
+		} catch (error) {
+			console.error('❌ [DEBUG] Error listing seasons:', error);
+		}
+	};
+
+	console.log('🔍 [CURRENT SEASON] currentSeason data:', currentSeason);
+	console.log('🔍 [ORGANIZED TEAMS] organizedTeams data:', organizedTeams);
 
 	return (
 		<div className="space-y-6">
@@ -33,7 +43,7 @@ const SeasonSetup: React.FC = observer(() => {
 						<div className="flex items-center justify-between">
 							<div>
 								<h2 className="text-xl font-semibold text-white mb-2">
-									{currentSeason.season_year} Season
+									{currentSeason.year} Season
 								</h2>
 								<div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
 									<div>
@@ -73,13 +83,13 @@ const SeasonSetup: React.FC = observer(() => {
 							<div className="text-4xl mb-4">🏆</div>
 							<h3 className="text-lg font-semibold text-white mb-2">Season Complete!</h3>
 							<p className="text-secondary-400 mb-4">
-								Ready to start the {currentSeason.season_year + 1} season?
+								Ready to start the {currentSeason.year + 1} season?
 							</p>
 							<Button
 								onClick={handleStartNewSeason}
 								loading={loading}
 							>
-								Start {currentSeason.season_year + 1} Season
+								Start {currentSeason.year + 1} Season
 							</Button>
 						</div>
 					)}
@@ -87,25 +97,21 @@ const SeasonSetup: React.FC = observer(() => {
 			) : (
 				<div className="card p-8 text-center">
 					<div className="text-6xl mb-4">🏈</div>
-					<h2 className="text-xl font-semibold text-white mb-2">Create New Season</h2>
+					<h2 className="text-xl font-semibold text-white mb-2">No Season Selected</h2>
 					<p className="text-secondary-400 mb-6">
-						Start a new NFL season with automated scheduling and comprehensive simulation.
+						Select a season from the dropdown above or create a new one to get started.
 					</p>
-					<div className="mb-4">
-						<Input
-							type="text"
-							value={seasonName}
-							onChange={e => setSeasonName(e.target.value)}
-							placeholder="Season Name"
-							disabled={loading}
-							label="Season Name"
-						/>
-					</div>
 					<Button
 						onClick={handleCreateSeason}
 						loading={loading}
 					>
 						Create 2024 Season
+					</Button>
+					<Button
+						onClick={handleDebugSeasons}
+						variant="secondary"
+					>
+						Debug: List All Seasons
 					</Button>
 				</div>
 			)}
